@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>高齡 30 秒椅子站立檢測系統</title>
+    <title>高齡 30 秒椅子站立檢測系統 (後置鏡頭版)</title>
     <style>
         body { 
             font-family: '微軟正黑體', sans-serif; 
@@ -25,7 +25,6 @@
         .counter-box { font-size: 40px; color: #2c3e50; font-weight: bold; margin: 5px 0; }
         .status-box { font-size: 18px; color: #7f8c8d; font-weight: bold; height: 25px; margin-bottom: 10px; }
         
-        /* 姓名輸入框樣式 */
         #elder-name {
             font-size: 20px; 
             padding: 12px; 
@@ -110,8 +109,8 @@
     <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/pose@0.8/dist/teachablemachine-pose.min.js"></script>
 
     <script>
-        // 你專屬的 Teachable Machine Pose 模型網址
         const URL = "https://teachablemachine.withgoogle.com/models/sjlfJwW7G/";
+        const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx_9mZXhtcgmUolZjy-QjOFWzwLUb-7-nkr6VoDqmqYRv47L0L8kOzZu4VSb2LptB96fQ/exec";
         
         let model, webcam, ctx, maxPredictions;
         let count = 0;
@@ -121,7 +120,6 @@
         let timerInterval = null;
         const CONFIDENCE_THRESHOLD = 0.85;
 
-        // 網頁載入時自動啟動攝影機與模型
         window.onload = init;
 
         async function init() {
@@ -129,15 +127,19 @@
             document.getElementById("start-btn").disabled = true;
 
             try {
-                // 載入模型
                 model = await tmPose.load(URL + "model.json", URL + "metadata.json");
                 maxPredictions = model.getTotalClasses();
                 
-                // 設定手機直式鏡頭比例 (480x640)
                 const camWidth = 480;
                 const camHeight = 640;
-                webcam = new tmPose.Webcam(camWidth, camHeight, true); 
-                await webcam.setup(); 
+                
+                // 【修正處 1】將 flip 設為 false，因為後置鏡頭不需要鏡像翻轉
+                const flip = false; 
+                webcam = new tmPose.Webcam(camWidth, camHeight, flip); 
+                
+                // 【修正處 2】在 setup 時指定使用後置鏡頭 (facingMode: "environment")
+                await webcam.setup({ facingMode: "environment" }); 
+                
                 await webcam.play();
                 window.requestAnimationFrame(loop);
 
@@ -148,17 +150,16 @@
 
                 document.getElementById("start-btn").innerText = "開始 30 秒測驗";
                 document.getElementById("start-btn").disabled = false;
-                document.getElementById("status-display").innerText = "準備就緒！請填寫姓名後點擊開始";
+                document.getElementById("status-display").innerText = "準備就緒！使用後置鏡頭中";
                 document.getElementById("status-display").style.color = "#2c3e50";
             } catch (error) {
-                alert("啟動失敗，請檢查網路或允許相機權限。");
+                alert("啟動失敗，請檢查權限或確保瀏覽器支援後置鏡頭。");
                 console.error(error);
-                document.getElementById("status-display").innerText = "相機權限被阻擋或網路異常";
+                document.getElementById("status-display").innerText = "相機啟動異常";
             }
         }
 
         async function startTest() {
-            // 避免未輸入姓名就測驗
             let elderName = document.getElementById("elder-name").value;
             if (elderName.trim() === "") {
                 let confirmStart = confirm("您尚未輸入長輩姓名，要以「未具名」直接開始測驗嗎？");
@@ -169,7 +170,6 @@
             const overlay = document.getElementById("overlay-text");
             overlay.style.display = "block";
             
-            // 3-2-1 預備倒數
             for (let i = 3; i > 0; i--) {
                 overlay.innerText = i;
                 await new Promise(r => setTimeout(r, 1000));
@@ -178,15 +178,13 @@
             overlay.innerText = "GO!";
             setTimeout(() => { overlay.style.display = "none"; }, 800);
 
-            // 重置數值，正式開始測驗
             count = 0;
             timeLeft = 30.0;
             isTesting = true;
             document.getElementById("count-display").innerText = "0";
-            document.getElementById("status-display").innerText = "測驗進行中，請保持動作標準...";
+            document.getElementById("status-display").innerText = "測驗進行中...";
             document.getElementById("status-display").style.color = "#e74c3c";
 
-            // 啟動 30 秒倒數計時器
             timerInterval = setInterval(() => {
                 timeLeft -= 0.1;
                 if (timeLeft <= 0) {
@@ -202,48 +200,33 @@
             isTesting = false;
             timeLeft = 0;
             document.getElementById("timer-display").innerText = "0.0";
-            document.getElementById("status-display").innerText = "測驗結束！資料自動上傳中...";
+            document.getElementById("status-display").innerText = "資料自動上傳中...";
             document.getElementById("status-display").style.color = "#f39c12"; 
             
             if (window.navigator.vibrate) window.navigator.vibrate(500);
 
-            // --- GAS 資料導出邏輯 ---
-            let elderName = document.getElementById("elder-name").value;
-            if (elderName.trim() === "") {
-                elderName = "未具名長輩";
-            }
-
-            // ！！！非常重要：請將下方網址換成你的 GAS 網頁應用程式 URL ！！！
-            const GAS_API_URL = "https://script.google.com/macros/s/AKfycbx_9mZXhtcgmUolZjy-QjOFWzwLUb-7-nkr6VoDqmqYRv47L0L8kOzZu4VSb2LptB96fQ/exec";
-            
-            // 如果你還沒設定 GAS，可以先把這段註解掉或忽略報錯
-            if(GAS_API_URL.includes("YOUR_GAS_API_URL")) {
-                alert(`測驗完成！\n姓名：${elderName}\n次數：${count} 次\n\n(提示：尚未綁定 GAS 試算表，故未上傳雲端)`);
-                resetUI();
-                return;
-            }
+            let elderName = document.getElementById("elder-name").value || "未具名長輩";
 
             const requestUrl = `${GAS_API_URL}?name=${encodeURIComponent(elderName)}&count=${count}`;
 
             fetch(requestUrl, { method: 'GET', mode: 'no-cors' })
                 .then(() => {
-                    document.getElementById("status-display").innerText = "✅ 資料已成功存入雲端試算表！";
+                    document.getElementById("status-display").innerText = "✅ 資料已成功存入雲端！";
                     document.getElementById("status-display").style.color = "#27ae60";
-                    alert(`測驗完成！\n姓名：${elderName}\n次數：${count} 次\n\n資料已成功儲存！`);
+                    alert(`測驗完成！\n姓名：${elderName}\n次數：${count} 次`);
                     resetUI();
                 })
                 .catch(error => {
                     console.error("上傳失敗:", error);
-                    document.getElementById("status-display").innerText = "⚠️ 上傳失敗，請檢查網路連線。";
-                    document.getElementById("status-display").style.color = "#c0392b";
+                    document.getElementById("status-display").innerText = "⚠️ 上傳失敗";
                     resetUI();
                 });
         }
 
         function resetUI() {
             document.getElementById("start-btn").disabled = false;
-            document.getElementById("start-btn").innerText = "重新進行下一位測驗";
-            document.getElementById("elder-name").value = ""; // 清空姓名欄位方便下一位測驗
+            document.getElementById("start-btn").innerText = "重新進行測驗";
+            document.getElementById("elder-name").value = ""; 
         }
 
         async function loop(timestamp) {
@@ -271,7 +254,6 @@
                     currentState = "Stand";
                 } 
                 else if (detectedPose === "Sit" || detectedPose === "坐下") {
-                    // 必須正在測驗中 (isTesting = true) 才會計次
                     if (currentState === "Stand" && isTesting) {
                         count++;
                         document.getElementById("count-display").innerText = count;
