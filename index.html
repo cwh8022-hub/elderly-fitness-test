@@ -134,7 +134,7 @@
                 const camHeight = 640;
                 
                 // 【修正處 1】將 flip 設為 false，因為後置鏡頭不需要鏡像翻轉
-                const flip = false; 
+                const flip = true; 
                 webcam = new tmPose.Webcam(camWidth, camHeight, flip); 
                 
                 // 【修正處 2】在 setup 時指定使用後置鏡頭 (facingMode: "environment")
