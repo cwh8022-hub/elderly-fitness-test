@@ -3,14 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>高齡 30 秒椅子站立檢測 (無變形原生版)</title>
+    <title>高齡 30 秒椅子站立檢測 (姓名記錄版)</title>
     <style>
         body { font-family: '微軟正黑體', sans-serif; text-align: center; background-color: #f4f6f9; margin: 0; padding: 10px; }
+        .input-group { margin: 15px auto; width: 90%; max-width: 400px; text-align: left; }
+        label { font-weight: bold; color: #2c3e50; }
+        input[type="text"] { width: 100%; padding: 12px; margin-top: 5px; border-radius: 8px; border: 1px solid #bdc3c7; font-size: 18px; box-sizing: border-box; }
+        
         .timer-box { font-size: 60px; color: #e67e22; font-weight: bold; margin-top: 5px; }
         .counter-box { font-size: 40px; color: #2c3e50; font-weight: bold; margin: 5px 0; }
         
         #debug-panel { 
-            font-size: 22px; color: #c0392b; font-weight: bold; background: #fdebd0; 
+            font-size: 20px; color: #c0392b; font-weight: bold; background: #fdebd0; 
             padding: 10px; border-radius: 10px; border: 3px dashed #e67e22; margin: 10px auto; width: 90%; max-width: 400px;
         }
 
@@ -27,6 +31,11 @@
     </style>
 </head>
 <body>
+
+    <div class="input-group">
+        <label for="p-name">長者姓名：</label>
+        <input type="text" id="p-name" placeholder="請輸入姓名">
+    </div>
 
     <div class="timer-box" id="timer-display">30.0</div>
     <div class="counter-box">次數：<span id="count-display">0</span></div>
@@ -54,28 +63,25 @@
         let model, ctx;
         let videoElement = document.getElementById('native-video');
         let count = 0;
-        let currentState = "None"; 
         let isTesting = false; 
         let timerInterval = null;
+        
+        // 【核心邏輯變數】
+        let hasStoodUp = false; // 紀錄是否已經完成「站起來」這個動作
 
         async function init() {
-            document.getElementById("init-btn").innerText = "載入中...";
+            document.getElementById("init-btn").innerText = "載入模型中...";
             document.getElementById("init-btn").disabled = true;
 
             try {
-                // 1. 載入模型
                 model = await tmPose.load(URL + "model.json", URL + "metadata.json");
-                
-                // 2. 呼叫原生相機
                 const stream = await navigator.mediaDevices.getUserMedia({
                     video: { facingMode: "environment" } 
                 });
                 videoElement.srcObject = stream;
 
-                // 3. 等待鏡頭畫面載入
                 videoElement.onloadedmetadata = () => {
-                    videoElement.play(); // 【關鍵修復1】強制啟動影片播放，否則畫面會永遠凍結在第一影格！
-
+                    videoElement.play(); 
                     const canvas = document.getElementById("canvas");
                     canvas.width = videoElement.videoWidth; 
                     canvas.height = videoElement.videoHeight;
@@ -83,28 +89,32 @@
                     
                     document.getElementById("init-btn").style.display = "none";
                     document.getElementById("start-btn").disabled = false;
-                    document.getElementById("status-display").innerText = "相機已啟動！";
+                    document.getElementById("status-display").innerText = "準備就緒，輸入姓名後即可開始";
                     
                     window.requestAnimationFrame(loop);
                 };
             } catch (error) {
                 alert("相機開啟失敗！請檢查權限設定。");
-                document.getElementById("init-btn").innerText = "重試開啟相機";
-                document.getElementById("init-btn").disabled = false;
             }
         }
 
         async function startTest() {
+            let name = document.getElementById("p-name").value;
+            if(!name) {
+                alert("請先輸入長者姓名再開始測驗！");
+                return;
+            }
+
             document.getElementById("start-btn").disabled = true;
+            document.getElementById("p-name").disabled = true;
             count = 0;
             isTesting = true;
-            currentState = "Sit"; 
+            hasStoodUp = false; // 重置狀態
             document.getElementById("count-display").innerText = "0";
             document.getElementById("status-display").innerText = "測驗進行中...";
 
-            // 【關鍵修復2】改用真實時間 (Date.now()) 來倒數，避免被 AI 運算卡死
             let startTime = Date.now();
-            let duration = 30000; // 30秒
+            let duration = 30000; 
 
             if(timerInterval) clearInterval(timerInterval);
             
@@ -116,20 +126,20 @@
                     clearInterval(timerInterval);
                     isTesting = false;
                     document.getElementById("timer-display").innerText = "0.0";
-                    document.getElementById("status-display").innerText = "測驗結束！";
+                    document.getElementById("status-display").innerText = `測驗結束！${name} 完成了 ${count} 次`;
                     document.getElementById("start-btn").disabled = false;
+                    document.getElementById("p-name").disabled = false;
                     document.getElementById("start-btn").innerText = "重新測驗";
                 } else {
                     document.getElementById("timer-display").innerText = timeLeft.toFixed(1);
                 }
-            }, 50); // 加快更新頻率讓 UI 更順暢
+            }, 50);
         }
 
         async function loop() {
             if (videoElement.readyState >= 2) { 
                 await predict();
             }
-            // 【關鍵修復3】稍微暫停 0 毫秒，強迫 AI 讓出資源給瀏覽器更新畫面與計時器
             await new Promise(resolve => setTimeout(resolve, 0)); 
             window.requestAnimationFrame(loop);
         }
@@ -139,27 +149,30 @@
             const prediction = await model.predict(posenetOutput);
 
             let bestPred = prediction.reduce((prev, current) => (prev.probability > current.probability) ? prev : current);
-            let aiName = bestPred.className;
+            let aiName = bestPred.className; // 你的標籤：站力, 坐下, 空椅子
             let aiScore = Math.round(bestPred.probability * 100);
 
-            document.getElementById("debug-panel").innerText = `AI 看到：【 ${aiName} 】 (${aiScore}%)`;
+            // 更新除錯面板內容
+            let flagText = hasStoodUp ? "【已起身，待坐下】" : "【等待起身】";
+            document.getElementById("debug-panel").innerText = `AI 看到：${aiName} (${aiScore}%) \n 邏輯狀態：${flagText}`;
 
-            let nameLower = aiName.toLowerCase();
-
-            if (bestPred.probability > 0.60) {
-                if (nameLower.includes("stand") || nameLower.includes("站") || nameLower.includes("起") || nameLower.includes("1")) {
-                    currentState = "Stand";
+            // --- 精準計數邏輯 ---
+            if (isTesting && bestPred.probability > 0.60) {
+                if (aiName === "站力") {
+                    hasStoodUp = true; // 標記為已站起
                 } 
-                else if (nameLower.includes("sit") || nameLower.includes("坐") || nameLower.includes("2")) {
-                    // 計數邏輯：必須是「先站起來」然後「坐下去」才算完成一次 (完整循環)
-                    if (currentState === "Stand" && isTesting) {
+                else if (aiName === "坐下") {
+                    // 只有在「之前有起身」的情況下，現在看到「坐下」才算一次
+                    if (hasStoodUp) {
                         count++;
                         document.getElementById("count-display").innerText = count;
+                        hasStoodUp = false; // 完成一次，重置起身標記
                     }
-                    currentState = "Sit"; 
                 }
+                // 如果是 "空椅子"，則不處理，維持原狀
             }
 
+            // 繪製骨架
             ctx.drawImage(videoElement, 0, 0, document.getElementById("canvas").width, document.getElementById("canvas").height);
             if (pose) {
                 tmPose.drawKeypoints(pose.keypoints, 0.5, ctx, 6);
