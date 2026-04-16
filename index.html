@@ -3,52 +3,44 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>高齡 30 秒椅子站立檢測 (原生高準度版)</title>
+    <title>高齡 30 秒站立檢測 (除錯強化版)</title>
     <style>
         body { font-family: '微軟正黑體', sans-serif; text-align: center; background-color: #f4f6f9; margin: 0; padding: 10px; }
         .input-group { margin: 10px auto; width: 90%; max-width: 400px; text-align: left; }
-        label { font-weight: bold; color: #2c3e50; }
         input[type="text"] { width: 100%; padding: 10px; margin-top: 5px; border-radius: 8px; border: 1px solid #bdc3c7; font-size: 16px; box-sizing: border-box; }
-        
-        .timer-box { font-size: 60px; color: #e67e22; font-weight: bold; margin-top: 5px; }
+        .timer-box { font-size: 60px; color: #e67e22; font-weight: bold; }
         .counter-box { font-size: 40px; color: #2c3e50; font-weight: bold; margin: 5px 0; }
         
+        /* 強化除錯面板：列出所有標籤機率 */
         #debug-panel { 
-            font-size: 20px; color: #c0392b; font-weight: bold; background: #fdebd0; 
-            padding: 10px; border-radius: 10px; border: 3px dashed #e67e22; margin: 10px auto; width: 90%; max-width: 400px;
+            font-size: 16px; color: #c0392b; text-align: left; background: #fff; 
+            padding: 10px; border-radius: 10px; border: 2px solid #e67e22; margin: 10px auto; width: 90%; max-width: 400px;
+            font-family: monospace;
         }
 
-        .status-box { font-size: 18px; color: #7f8c8d; font-weight: bold; height: 25px; margin-bottom: 10px; }
-        .btn-group { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 15px; width: 100%; }
-        button { font-size: 20px; padding: 15px 0; width: 90%; max-width: 400px; color: white; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; }
+        .status-box { font-size: 18px; color: #7f8c8d; font-weight: bold; margin-bottom: 10px; }
+        button { font-size: 20px; padding: 15px 0; width: 90%; max-width: 400px; color: white; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; margin: 5px 0; }
         #init-btn { background-color: #e67e22; }
         #start-btn { background-color: #27ae60; }
-        #start-btn:disabled { background-color: #95a5a6; cursor: not-allowed; }
-        
-        #canvas-container { margin: 0 auto; display: flex; justify-content: center; width: 100%; max-width: 480px; position: relative; }
-        canvas { border-radius: 15px; background-color: #000; width: 100%; height: auto; }
-        .flipped { transform: scaleX(-1); }
+        #start-btn:disabled { background-color: #95a5a6; }
+        canvas { border-radius: 15px; background-color: #000; width: 100%; max-width: 480px; height: auto; }
     </style>
 </head>
 <body>
 
     <div class="input-group">
-        <label for="p-name">長者姓名：</label>
+        <label>長者姓名：</label>
         <input type="text" id="p-name" placeholder="請輸入姓名">
     </div>
 
     <div class="timer-box" id="timer-display">30.0</div>
     <div class="counter-box">次數：<span id="count-display">0</span></div>
     
-    <div id="debug-panel">等待相機啟動...</div>
+    <div id="debug-panel">等待數據...</div>
     <div class="status-box" id="status-display">等待啟動...</div>
 
-    <div class="btn-group">
-        <button id="init-btn" onclick="init()">1. 點此開啟相機</button>
-        <button id="start-btn" onclick="startTest()" disabled>2. 開始 30 秒測驗</button>
-    </div>
-
-    <button onclick="document.getElementById('canvas').classList.toggle('flipped')" style="background:#3498db; font-size:16px; padding:10px; margin-bottom:10px; color:white; border:none; border-radius:8px;">🪞 切換螢幕左右方向</button>
+    <button id="init-btn" onclick="init()">1. 開啟相機</button>
+    <button id="start-btn" onclick="startTest()" disabled>2. 開始測驗</button>
 
     <div id="canvas-container">
         <video id="native-video" playsinline autoplay muted style="display:none;"></video>
@@ -60,128 +52,88 @@
 
     <script>
         const URL = "https://teachablemachine.withgoogle.com/models/m5xSQ1Ixr/";
-        let model, ctx;
-        let videoElement = document.getElementById('native-video');
-        let canvas = document.getElementById("canvas");
-        let count = 0;
-        let isTesting = false; 
+        let model, ctx, videoElement, canvas;
+        let count = 0, isTesting = false, hasStoodUp = false;
         let timerInterval = null;
-        let hasStoodUp = false; 
 
         async function init() {
-            document.getElementById("init-btn").innerText = "載入模型中...";
-            document.getElementById("init-btn").disabled = true;
-
+            videoElement = document.getElementById('native-video');
+            canvas = document.getElementById("canvas");
+            document.getElementById("init-btn").innerText = "模型載入中...";
+            
             try {
                 model = await tmPose.load(URL + "model.json", URL + "metadata.json");
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: "environment" } 
-                });
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
                 videoElement.srcObject = stream;
-
                 videoElement.onloadedmetadata = () => {
-                    videoElement.play(); 
-                    
-                    // 稍微延遲 0.5 秒，確保手機相機真的抓到真實長寬，避免被壓扁
-                    setTimeout(() => {
-                        canvas.width = videoElement.videoWidth; 
-                        canvas.height = videoElement.videoHeight;
-                        ctx = canvas.getContext("2d");
-                        
-                        document.getElementById("init-btn").style.display = "none";
-                        document.getElementById("start-btn").disabled = false;
-                        document.getElementById("status-display").innerText = "準備就緒，可開始測驗";
-                        
-                        window.requestAnimationFrame(loop);
-                    }, 500);
+                    videoElement.play();
+                    canvas.width = videoElement.videoWidth;
+                    canvas.height = videoElement.videoHeight;
+                    ctx = canvas.getContext("2d");
+                    document.getElementById("init-btn").style.display = "none";
+                    document.getElementById("start-btn").disabled = false;
+                    document.getElementById("status-display").innerText = "準備就緒";
+                    window.requestAnimationFrame(loop);
                 };
-            } catch (error) {
-                alert("相機開啟失敗！請檢查相機權限設定。");
-            }
+            } catch (e) { alert("無法開啟相機"); }
         }
 
         async function startTest() {
-            let name = document.getElementById("p-name").value;
-            if(!name) {
-                alert("請先輸入長者姓名再開始測驗！");
-                return;
-            }
-
-            document.getElementById("start-btn").disabled = true;
-            document.getElementById("p-name").disabled = true;
-            count = 0;
-            isTesting = true;
-            hasStoodUp = false; 
+            if(!document.getElementById("p-name").value) return alert("請輸入姓名");
+            count = 0; isTesting = true; hasStoodUp = false;
             document.getElementById("count-display").innerText = "0";
-            document.getElementById("status-display").innerText = "測驗進行中...";
-
-            let startTime = Date.now();
-            let duration = 30000; 
-
-            if(timerInterval) clearInterval(timerInterval);
-            
+            let timeLeft = 30.0;
             timerInterval = setInterval(() => {
-                let passedTime = Date.now() - startTime;
-                let timeLeft = Math.max(0, (duration - passedTime) / 1000);
-
-                if (timeLeft <= 0) {
+                timeLeft -= 0.1;
+                document.getElementById("timer-display").innerText = timeLeft.toFixed(1);
+                if(timeLeft <= 0) {
                     clearInterval(timerInterval);
                     isTesting = false;
-                    document.getElementById("timer-display").innerText = "0.0";
-                    document.getElementById("status-display").innerText = `測驗結束！${name} 完成了 ${count} 次`;
+                    document.getElementById("status-display").innerText = "測驗完成！";
                     document.getElementById("start-btn").disabled = false;
-                    document.getElementById("p-name").disabled = false;
-                    document.getElementById("start-btn").innerText = "重新測驗";
-                } else {
-                    document.getElementById("timer-display").innerText = timeLeft.toFixed(1);
                 }
             }, 100);
+            document.getElementById("start-btn").disabled = true;
         }
 
         async function loop() {
-            if (videoElement.readyState >= 2) { 
-                await predict();
-            }
-            await new Promise(resolve => setTimeout(resolve, 0)); 
+            if (videoElement.readyState >= 2) await predict();
             window.requestAnimationFrame(loop);
         }
 
         async function predict() {
-            // 1. 直接餵給 AI 最純粹的原生相機影像
             const { pose, posenetOutput } = await model.estimatePose(videoElement);
-
-            // 2. 將原生影像畫到 Canvas 上讓使用者看
-            ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-
-            if (pose && posenetOutput) {
-                // 3. 畫出骨架
-                tmPose.drawKeypoints(pose.keypoints, 0.5, ctx, 6);
-                tmPose.drawSkeleton(pose.keypoints, 0.5, ctx, 4);
+            ctx.drawImage(videoElement, 0, 0);
+            if (pose) {
+                tmPose.drawKeypoints(pose.keypoints, 0.5, ctx);
+                tmPose.drawSkeleton(pose.keypoints, 0.5, ctx);
 
                 const prediction = await model.predict(posenetOutput);
                 
-                if (prediction && prediction.length > 0) {
-                    let bestPred = prediction.reduce((prev, current) => (prev.probability > current.probability) ? prev : current);
-                    
-                    // 加上 .trim() 避免 Teachable Machine 的標籤帶有隱形空白字元
-                    let aiName = bestPred.className.trim(); 
-                    let aiScore = Math.round(bestPred.probability * 100);
+                // 找出各個標籤的分數
+                let sitScore = 0, standScore = 0, emptyScore = 0;
+                let debugText = "【即時機率監控】<br>";
+                
+                prediction.forEach(p => {
+                    let prob = (p.probability * 100).toFixed(0);
+                    debugText += `${p.className}: ${prob}%<br>`;
+                    if(p.className.includes("坐")) sitScore = p.probability;
+                    if(p.className.includes("站")) standScore = p.probability;
+                });
 
-                    let flagText = hasStoodUp ? "已起身" : "待起身";
-                    document.getElementById("debug-panel").innerText = `AI 看到：${aiName} (${aiScore}%) [${flagText}]`;
+                document.getElementById("debug-panel").innerHTML = debugText + `邏輯狀態：${hasStoodUp ? "已起身" : "待起身"}`;
 
-                    // 只要大於 50% 就採納，反應最快
-                    if (isTesting && bestPred.probability > 0.50) {
-                        if (aiName === "站力") {
-                            hasStoodUp = true; 
-                        } 
-                        else if (aiName === "坐下") {
-                            if (hasStoodUp) {
-                                count++;
-                                document.getElementById("count-display").innerText = count;
-                                hasStoodUp = false; 
-                            }
-                        }
+                // --- 調整後的判定邏輯 ---
+                if (isTesting) {
+                    // 1. 判定「站立」：信心值必須超過 85%
+                    if (standScore > 0.85) {
+                        hasStoodUp = true;
+                    } 
+                    // 2. 判定「坐下」：信心值必須超過 85%，且之前必須有站起來過
+                    else if (sitScore > 0.85 && hasStoodUp) {
+                        count++;
+                        document.getElementById("count-display").innerText = count;
+                        hasStoodUp = false; // 重置，等待下一次起身
                     }
                 }
             }
