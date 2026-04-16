@@ -3,52 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>高齡 30 秒椅子站立檢測 (終極穩定版)</title>
+    <title>高齡 30 秒椅子站立檢測 (X光抓漏版)</title>
     <style>
-        body { 
-            font-family: '微軟正黑體', sans-serif; text-align: center; background-color: #f4f6f9; margin: 0; padding: 10px; overscroll-behavior-y: contain; 
-        }
-        
+        body { font-family: '微軟正黑體', sans-serif; text-align: center; background-color: #f4f6f9; margin: 0; padding: 10px; overscroll-behavior-y: contain; }
         .timer-box { font-size: 60px; color: #e67e22; font-weight: bold; margin-top: 5px; text-shadow: 1px 1px 2px rgba(0,0,0,0.1); }
         .counter-box { font-size: 40px; color: #2c3e50; font-weight: bold; margin: 5px 0; }
+        
+        /* 🚨 新增：超級醒目的 AI 偵錯面板 */
+        #ai-debug { font-size: 22px; color: #c0392b; font-weight: bold; background-color: #fdebd0; padding: 10px; border-radius: 8px; margin-bottom: 10px; border: 2px dashed #e67e22; }
+        
         .status-box { font-size: 18px; color: #7f8c8d; font-weight: bold; height: 25px; margin-bottom: 10px; }
-        
         #error-panel { color: red; font-size: 18px; font-weight: bold; margin: 10px; display: none; background: #ffebee; padding: 10px; border-radius: 8px; border: 1px solid #ffcdd2;}
-        
-        #elder-name {
-            font-size: 20px; padding: 12px; margin-bottom: 15px; width: 90%; max-width: 400px; 
-            border-radius: 8px; border: 2px solid #bdc3c7; text-align: center; box-sizing: border-box;
-        }
-
+        #elder-name { font-size: 20px; padding: 12px; margin-bottom: 15px; width: 90%; max-width: 400px; border-radius: 8px; border: 2px solid #bdc3c7; text-align: center; box-sizing: border-box; }
         .btn-group { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 15px; width: 100%; }
-
-        button { 
-            font-size: 20px; padding: 15px 0; width: 90%; max-width: 400px;
-            color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
-        }
-        
+        button { font-size: 20px; padding: 15px 0; width: 90%; max-width: 400px; color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         #init-btn { background-color: #e67e22; }
         #init-btn:hover { background-color: #d35400; }
         #init-btn:disabled { background-color: #f39c12; cursor: wait; }
-
         #start-btn { background-color: #27ae60; }
         #start-btn:disabled { background-color: #95a5a6; cursor: not-allowed; }
-
         .control-panel { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-bottom: 15px; width: 100%; max-width: 480px; margin: 0 auto 15px auto; }
         .tool-btn { background-color: #3498db; font-size: 16px; padding: 10px; flex: 1; min-width: 140px; border-radius: 8px; }
         .tool-btn:hover { background-color: #2980b9; }
-
         #canvas-container { margin: 0 auto; display: flex; justify-content: center; width: 100%; max-width: 480px; position: relative; }
-        
         canvas { border-radius: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); background-color: #000; width: 100%; height: auto; transition: transform 0.3s ease; }
-
-        /* 切換畫面鏡像使用的 CSS */
         .flipped { transform: scaleX(-1); }
-
-        #overlay-text {
-            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            font-size: 100px; color: white; font-weight: bold; text-shadow: 0 0 20px rgba(0,0,0,0.8); display: none; pointer-events: none;
-        }
+        #overlay-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 100px; color: white; font-weight: bold; text-shadow: 0 0 20px rgba(0,0,0,0.8); display: none; pointer-events: none; }
     </style>
 </head>
 <body>
@@ -57,6 +37,9 @@
 
     <div class="timer-box" id="timer-display">30.0</div>
     <div class="counter-box">次數：<span id="count-display">0</span></div>
+    
+    <div id="ai-debug">👀 AI 視覺：等待相機啟動...</div>
+
     <div class="status-box" id="status-display">等待啟動...</div>
 
     <input type="text" id="elder-name" placeholder="請輸入受測長輩姓名">
@@ -88,13 +71,14 @@
         let isTesting = false; 
         let timeLeft = 30.0;
         let timerInterval = null;
-        const CONFIDENCE_THRESHOLD = 0.75; // 微調門檻確保靈敏
+        
+        // 降低門檻，適應手機鏡頭
+        const CONFIDENCE_THRESHOLD = 0.60; 
 
-        // --- 核心狀態變數 ---
-        let hasStood = false; // 「已起立」許可證
-        let currentFacingMode = "environment"; // 預設使用後置鏡頭
+        let hasStood = false; 
+        let currentFacingMode = "environment"; 
         let isLooping = false;
-        let animationFrameId = null; // 用來防止畫面疊加執行的控制器
+        let animationFrameId = null; 
 
         function showError(msg) {
             const panel = document.getElementById("error-panel");
@@ -116,9 +100,7 @@
             try {
                 model = await tmPose.load(URL + "model.json", URL + "metadata.json");
                 maxPredictions = model.getTotalClasses();
-                
                 await setupCamera(currentFacingMode);
-
             } catch (error) {
                 showError("無法載入 AI 模型，請檢查網路狀態。");
                 initBtn.innerText = "重新嘗試啟動";
@@ -128,13 +110,9 @@
 
         async function setupCamera(facingMode) {
             document.getElementById("status-display").innerText = "正在請求相機權限...";
-            
-            // 確實關閉舊的相機與迴圈，防止「改A壞B」的記憶體暴增重疊問題
             isLooping = false; 
             if (animationFrameId) window.cancelAnimationFrame(animationFrameId);
-            if (webcam) {
-                try { await webcam.stop(); } catch(e) {}
-            }
+            if (webcam) { try { await webcam.stop(); } catch(e) {} }
 
             const camWidth = 480;
             const camHeight = 640;
@@ -143,13 +121,11 @@
                 webcam = new tmPose.Webcam(camWidth, camHeight, false); 
                 await webcam.setup({ facingMode: facingMode });
                 await webcam.play();
-                
             } catch (err1) {
                 console.warn(facingMode + " 鏡頭啟動失敗，嘗試切換...", err1);
                 try {
                     let backupMode = (facingMode === "environment") ? "user" : "environment";
                     currentFacingMode = backupMode; 
-                    
                     webcam = new tmPose.Webcam(camWidth, camHeight, false); 
                     await webcam.setup({ facingMode: backupMode });
                     await webcam.play();
@@ -205,7 +181,7 @@
             count = 0;
             timeLeft = 30.0;
             isTesting = true;
-            hasStood = false; // 重置許可證
+            hasStood = false; 
             
             document.getElementById("count-display").innerText = "0";
             document.getElementById("status-display").innerText = "測驗進行中...";
@@ -275,24 +251,24 @@
                 }
             }
 
-            // --- 全新防呆計次邏輯 (絕不漏算、絕不多算) ---
+            // 🚨 將 AI 的內心世界印在畫面上
+            document.getElementById("ai-debug").innerText = `👀 AI 看到：[ ${detectedPose} ] 信心度：${(highestProbability * 100).toFixed(0)}%`;
+
             if (highestProbability > CONFIDENCE_THRESHOLD) {
                 
-                if (detectedPose === "Stand" || detectedPose === "站立" || detectedPose === "起立") {
+                // 【嚴格對比字串】包含你可能不小心打錯的標籤
+                if (detectedPose === "Stand" || detectedPose === "站立" || detectedPose === "起立" || detectedPose === "Class 1") {
                     if (isTesting) {
-                        hasStood = true; // 發放「已起立許可證」
+                        hasStood = true; 
                     }
                 } 
-                else if (detectedPose === "Sit" || detectedPose === "坐下") {
-                    // 必須帶著「已起立許可證」坐下，才算一次
+                else if (detectedPose === "Sit" || detectedPose === "坐下" || detectedPose === "Class 2") {
                     if (isTesting && hasStood) {
                         count++;
                         document.getElementById("count-display").innerText = count;
-                        hasStood = false; // 計算完畢，收回許可證
+                        hasStood = false; 
                     }
                 }
-                
-                // 即使 AI 閃爍判定為 "None"，也不會干擾 hasStood 許可證的狀態！
             }
 
             drawPose(pose);
