@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>高齡 30 秒椅子站立檢測 (姓名記錄版)</title>
+    <title>高齡 30 秒椅子站立檢測 (防呆不崩潰版)</title>
     <style>
         body { font-family: '微軟正黑體', sans-serif; text-align: center; background-color: #f4f6f9; margin: 0; padding: 10px; }
         .input-group { margin: 15px auto; width: 90%; max-width: 400px; text-align: left; }
@@ -51,7 +51,7 @@
     <button onclick="document.getElementById('canvas').classList.toggle('flipped')" style="background:#3498db; font-size:16px; padding:10px; margin-bottom:10px; color:white; border:none; border-radius:8px;">🪞 切換螢幕左右方向</button>
 
     <div id="canvas-container">
-        <video id="native-video" playsinline autoplay muted style="display:none;"></video>
+        <video id="native-video" playsinline autoplay muted style="position: absolute; width: 0; height: 0; visibility: hidden;"></video>
         <canvas id="canvas"></canvas>
     </div>
 
@@ -62,12 +62,11 @@
         const URL = "https://teachablemachine.withgoogle.com/models/m5xSQ1Ixr/";
         let model, ctx;
         let videoElement = document.getElementById('native-video');
+        let canvas = document.getElementById("canvas");
         let count = 0;
         let isTesting = false; 
         let timerInterval = null;
-        
-        // 【核心邏輯變數】
-        let hasStoodUp = false; // 紀錄是否已經完成「站起來」這個動作
+        let hasStoodUp = false; 
 
         async function init() {
             document.getElementById("init-btn").innerText = "載入模型中...";
@@ -82,9 +81,9 @@
 
                 videoElement.onloadedmetadata = () => {
                     videoElement.play(); 
-                    const canvas = document.getElementById("canvas");
-                    canvas.width = videoElement.videoWidth; 
-                    canvas.height = videoElement.videoHeight;
+                    // 確保 canvas 取得相機真實尺寸
+                    canvas.width = videoElement.videoWidth || 480; 
+                    canvas.height = videoElement.videoHeight || 640;
                     ctx = canvas.getContext("2d");
                     
                     document.getElementById("init-btn").style.display = "none";
@@ -94,7 +93,9 @@
                     window.requestAnimationFrame(loop);
                 };
             } catch (error) {
-                alert("相機開啟失敗！請檢查權限設定。");
+                alert("相機開啟失敗！請檢查相機權限設定。");
+                document.getElementById("init-btn").innerText = "重試開啟相機";
+                document.getElementById("init-btn").disabled = false;
             }
         }
 
@@ -109,7 +110,7 @@
             document.getElementById("p-name").disabled = true;
             count = 0;
             isTesting = true;
-            hasStoodUp = false; // 重置狀態
+            hasStoodUp = false; 
             document.getElementById("count-display").innerText = "0";
             document.getElementById("status-display").innerText = "測驗進行中...";
 
@@ -136,47 +137,58 @@
             }, 50);
         }
 
+        // 加入 try...catch 保護，就算 AI 報錯也不會導致畫面凍結！
         async function loop() {
-            if (videoElement.readyState >= 2) { 
-                await predict();
+            try {
+                if (videoElement.readyState >= 2) { 
+                    await predict();
+                }
+            } catch (err) {
+                console.error("AI 辨識發生小錯誤，已略過此影格:", err);
             }
             await new Promise(resolve => setTimeout(resolve, 0)); 
             window.requestAnimationFrame(loop);
         }
 
         async function predict() {
+            // 第一步：不管三七二十一，先畫相機底圖！避免白畫面
+            ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+
             const { pose, posenetOutput } = await model.estimatePose(videoElement);
-            const prediction = await model.predict(posenetOutput);
 
-            let bestPred = prediction.reduce((prev, current) => (prev.probability > current.probability) ? prev : current);
-            let aiName = bestPred.className; // 你的標籤：站力, 坐下, 空椅子
-            let aiScore = Math.round(bestPred.probability * 100);
-
-            // 更新除錯面板內容
-            let flagText = hasStoodUp ? "【已起身，待坐下】" : "【等待起身】";
-            document.getElementById("debug-panel").innerText = `AI 看到：${aiName} (${aiScore}%) \n 邏輯狀態：${flagText}`;
-
-            // --- 精準計數邏輯 ---
-            if (isTesting && bestPred.probability > 0.60) {
-                if (aiName === "站力") {
-                    hasStoodUp = true; // 標記為已站起
-                } 
-                else if (aiName === "坐下") {
-                    // 只有在「之前有起身」的情況下，現在看到「坐下」才算一次
-                    if (hasStoodUp) {
-                        count++;
-                        document.getElementById("count-display").innerText = count;
-                        hasStoodUp = false; // 完成一次，重置起身標記
-                    }
-                }
-                // 如果是 "空椅子"，則不處理，維持原狀
-            }
-
-            // 繪製骨架
-            ctx.drawImage(videoElement, 0, 0, document.getElementById("canvas").width, document.getElementById("canvas").height);
-            if (pose) {
+            // 第二步：確保有抓到骨架，才畫骨架和進行辨識 (防崩潰核心)
+            if (pose && posenetOutput) {
+                // 畫出骨架
                 tmPose.drawKeypoints(pose.keypoints, 0.5, ctx, 6);
                 tmPose.drawSkeleton(pose.keypoints, 0.5, ctx, 4);
+
+                const prediction = await model.predict(posenetOutput);
+                
+                // 確保預測結果不為空
+                if (prediction && prediction.length > 0) {
+                    let bestPred = prediction.reduce((prev, current) => (prev.probability > current.probability) ? prev : current);
+                    let aiName = bestPred.className; 
+                    let aiScore = Math.round(bestPred.probability * 100);
+
+                    let flagText = hasStoodUp ? "【已起身，待坐下】" : "【等待起身】";
+                    document.getElementById("debug-panel").innerText = `AI 看到：${aiName} (${aiScore}%) \n 邏輯狀態：${flagText}`;
+
+                    // --- 精準計數邏輯 ---
+                    if (isTesting && bestPred.probability > 0.60) {
+                        if (aiName === "站力") {
+                            hasStoodUp = true; 
+                        } 
+                        else if (aiName === "坐下") {
+                            if (hasStoodUp) {
+                                count++;
+                                document.getElementById("count-display").innerText = count;
+                                hasStoodUp = false; 
+                            }
+                        }
+                    }
+                }
+            } else {
+                document.getElementById("debug-panel").innerText = "未偵測到完整人體骨架...";
             }
         }
     </script>
