@@ -3,15 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>高齡 30 秒椅子站立檢測 (iOS 完美通行版)</title>
+    <title>高齡 30 秒椅子站立檢測 (終極穩定版)</title>
     <style>
         body { 
-            font-family: '微軟正黑體', sans-serif; 
-            text-align: center; 
-            background-color: #f4f6f9; 
-            margin: 0; 
-            padding: 10px; 
-            overscroll-behavior-y: contain; 
+            font-family: '微軟正黑體', sans-serif; text-align: center; background-color: #f4f6f9; margin: 0; padding: 10px; overscroll-behavior-y: contain; 
         }
         
         .timer-box { font-size: 60px; color: #e67e22; font-weight: bold; margin-top: 5px; text-shadow: 1px 1px 2px rgba(0,0,0,0.1); }
@@ -32,7 +27,6 @@
             color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
         }
         
-        /* 專門用來解開 iOS 限制的啟動按鈕 */
         #init-btn { background-color: #e67e22; }
         #init-btn:hover { background-color: #d35400; }
         #init-btn:disabled { background-color: #f39c12; cursor: wait; }
@@ -48,6 +42,7 @@
         
         canvas { border-radius: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); background-color: #000; width: 100%; height: auto; transition: transform 0.3s ease; }
 
+        /* 切換畫面鏡像使用的 CSS */
         .flipped { transform: scaleX(-1); }
 
         #overlay-text {
@@ -90,16 +85,16 @@
         
         let model, webcam, ctx, maxPredictions;
         let count = 0;
-        let currentState = "None"; 
         let isTesting = false; 
         let timeLeft = 30.0;
         let timerInterval = null;
-        const CONFIDENCE_THRESHOLD = 0.85;
+        const CONFIDENCE_THRESHOLD = 0.75; // 微調門檻確保靈敏
 
+        // --- 核心狀態變數 ---
+        let hasStood = false; // 「已起立」許可證
         let currentFacingMode = "environment"; // 預設使用後置鏡頭
         let isLooping = false;
-
-        // 移除了 window.onload = init; ，改由上方橘色按鈕觸發
+        let animationFrameId = null; // 用來防止畫面疊加執行的控制器
 
         function showError(msg) {
             const panel = document.getElementById("error-panel");
@@ -112,7 +107,6 @@
             document.getElementById("canvas").classList.toggle("flipped");
         }
 
-        // 由按鈕觸發的初始化函數
         async function init() {
             const initBtn = document.getElementById("init-btn");
             initBtn.innerText = "載入中，請稍候...";
@@ -134,8 +128,10 @@
 
         async function setupCamera(facingMode) {
             document.getElementById("status-display").innerText = "正在請求相機權限...";
-            isLooping = false; 
             
+            // 確實關閉舊的相機與迴圈，防止「改A壞B」的記憶體暴增重疊問題
+            isLooping = false; 
+            if (animationFrameId) window.cancelAnimationFrame(animationFrameId);
             if (webcam) {
                 try { await webcam.stop(); } catch(e) {}
             }
@@ -158,7 +154,7 @@
                     await webcam.setup({ facingMode: backupMode });
                     await webcam.play();
                 } catch (err2) {
-                    showError("相機權限被拒絕，或瀏覽器不支援。請確認網址為 https。");
+                    showError("相機權限被拒絕，或瀏覽器不支援。");
                     document.getElementById("init-btn").innerText = "啟動失敗";
                     return; 
                 }
@@ -170,7 +166,6 @@
             canvas.height = camHeight;
             ctx = canvas.getContext("2d");
             
-            // 成功啟動後，隱藏橘色按鈕，解鎖綠色開始測驗按鈕
             document.getElementById("init-btn").style.display = "none";
             document.getElementById("start-btn").disabled = false;
             
@@ -179,7 +174,7 @@
             document.getElementById("status-display").style.color = "#27ae60";
 
             isLooping = true;
-            window.requestAnimationFrame(loop);
+            loop();
         }
 
         async function switchCamera() {
@@ -210,7 +205,7 @@
             count = 0;
             timeLeft = 30.0;
             isTesting = true;
-            currentState = "Sit"; 
+            hasStood = false; // 重置許可證
             
             document.getElementById("count-display").innerText = "0";
             document.getElementById("status-display").innerText = "測驗進行中...";
@@ -258,11 +253,11 @@
             document.getElementById("elder-name").value = ""; 
         }
 
-        async function loop(timestamp) {
+        async function loop() {
             if (isLooping && webcam && webcam.canvas) {
                 webcam.update(); 
                 await predict();
-                window.requestAnimationFrame(loop);
+                animationFrameId = window.requestAnimationFrame(loop);
             }
         }
 
@@ -280,21 +275,26 @@
                 }
             }
 
+            // --- 全新防呆計次邏輯 (絕不漏算、絕不多算) ---
             if (highestProbability > CONFIDENCE_THRESHOLD) {
+                
                 if (detectedPose === "Stand" || detectedPose === "站立" || detectedPose === "起立") {
-                    currentState = "Stand";
+                    if (isTesting) {
+                        hasStood = true; // 發放「已起立許可證」
+                    }
                 } 
                 else if (detectedPose === "Sit" || detectedPose === "坐下") {
-                    if (currentState === "Stand" && isTesting) {
+                    // 必須帶著「已起立許可證」坐下，才算一次
+                    if (isTesting && hasStood) {
                         count++;
                         document.getElementById("count-display").innerText = count;
+                        hasStood = false; // 計算完畢，收回許可證
                     }
-                    currentState = "Sit"; 
                 }
-                else {
-                    currentState = "None";
-                }
+                
+                // 即使 AI 閃爍判定為 "None"，也不會干擾 hasStood 許可證的狀態！
             }
+
             drawPose(pose);
         }
 
