@@ -3,55 +3,50 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>高齡 30 秒椅子站立檢測 (X光抓漏版)</title>
+    <title>高齡 30 秒椅子站立檢測 (原廠超靈敏版)</title>
     <style>
         body { font-family: '微軟正黑體', sans-serif; text-align: center; background-color: #f4f6f9; margin: 0; padding: 10px; overscroll-behavior-y: contain; }
         .timer-box { font-size: 60px; color: #e67e22; font-weight: bold; margin-top: 5px; text-shadow: 1px 1px 2px rgba(0,0,0,0.1); }
         .counter-box { font-size: 40px; color: #2c3e50; font-weight: bold; margin: 5px 0; }
-        
-        /* 🚨 新增：超級醒目的 AI 偵錯面板 */
-        #ai-debug { font-size: 22px; color: #c0392b; font-weight: bold; background-color: #fdebd0; padding: 10px; border-radius: 8px; margin-bottom: 10px; border: 2px dashed #e67e22; }
-        
         .status-box { font-size: 18px; color: #7f8c8d; font-weight: bold; height: 25px; margin-bottom: 10px; }
-        #error-panel { color: red; font-size: 18px; font-weight: bold; margin: 10px; display: none; background: #ffebee; padding: 10px; border-radius: 8px; border: 1px solid #ffcdd2;}
+        
         #elder-name { font-size: 20px; padding: 12px; margin-bottom: 15px; width: 90%; max-width: 400px; border-radius: 8px; border: 2px solid #bdc3c7; text-align: center; box-sizing: border-box; }
+
         .btn-group { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 15px; width: 100%; }
+        
         button { font-size: 20px; padding: 15px 0; width: 90%; max-width: 400px; color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         #init-btn { background-color: #e67e22; }
-        #init-btn:hover { background-color: #d35400; }
         #init-btn:disabled { background-color: #f39c12; cursor: wait; }
         #start-btn { background-color: #27ae60; }
         #start-btn:disabled { background-color: #95a5a6; cursor: not-allowed; }
-        .control-panel { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-bottom: 15px; width: 100%; max-width: 480px; margin: 0 auto 15px auto; }
-        .tool-btn { background-color: #3498db; font-size: 16px; padding: 10px; flex: 1; min-width: 140px; border-radius: 8px; }
-        .tool-btn:hover { background-color: #2980b9; }
+
+        .control-panel { display: flex; justify-content: center; width: 100%; max-width: 480px; margin: 0 auto 15px auto; }
+        .tool-btn { background-color: #3498db; font-size: 16px; padding: 10px; width: 90%; border-radius: 8px; }
+
         #canvas-container { margin: 0 auto; display: flex; justify-content: center; width: 100%; max-width: 480px; position: relative; }
         canvas { border-radius: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); background-color: #000; width: 100%; height: auto; transition: transform 0.3s ease; }
+        
+        /* 切換畫面左右用的 */
         .flipped { transform: scaleX(-1); }
+
         #overlay-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 100px; color: white; font-weight: bold; text-shadow: 0 0 20px rgba(0,0,0,0.8); display: none; pointer-events: none; }
     </style>
 </head>
 <body>
 
-    <div id="error-panel"></div>
-
     <div class="timer-box" id="timer-display">30.0</div>
     <div class="counter-box">次數：<span id="count-display">0</span></div>
-    
-    <div id="ai-debug">👀 AI 視覺：等待相機啟動...</div>
-
     <div class="status-box" id="status-display">等待啟動...</div>
 
     <input type="text" id="elder-name" placeholder="請輸入受測長輩姓名">
 
     <div class="btn-group">
-        <button id="init-btn" type="button" onclick="init()">步驟一：點此啟動相機與 AI</button>
-        <button id="start-btn" type="button" onclick="startTest()" disabled>步驟二：開始 30 秒測驗</button>
+        <button id="init-btn" onclick="init()">點此啟動相機 (iPhone 專用)</button>
+        <button id="start-btn" onclick="startTest()" disabled>開始 30 秒測驗</button>
     </div>
 
     <div class="control-panel">
-        <button class="tool-btn" onclick="switchCamera()">🔄 切換前後鏡頭</button>
-        <button class="tool-btn" onclick="toggleVisualFlip()">🪞 切換畫面方向</button>
+        <button class="tool-btn" onclick="toggleVisualFlip()">🪞 切換螢幕左右方向 (方便對準)</button>
     </div>
 
     <div id="canvas-container">
@@ -68,95 +63,46 @@
         
         let model, webcam, ctx, maxPredictions;
         let count = 0;
+        let currentState = "None"; // 退回你最愛的原始核心邏輯
         let isTesting = false; 
         let timeLeft = 30.0;
         let timerInterval = null;
         
-        // 降低門檻，適應手機鏡頭
-        const CONFIDENCE_THRESHOLD = 0.60; 
-
-        let hasStood = false; 
-        let currentFacingMode = "environment"; 
-        let isLooping = false;
-        let animationFrameId = null; 
-
-        function showError(msg) {
-            const panel = document.getElementById("error-panel");
-            panel.style.display = "block";
-            panel.innerText = "⚠️ " + msg;
-            document.getElementById("status-display").innerText = "啟動中斷";
-        }
+        // 恢復最初的高門檻，確保只有標準動作才計數
+        const CONFIDENCE_THRESHOLD = 0.85; 
 
         function toggleVisualFlip() {
             document.getElementById("canvas").classList.toggle("flipped");
         }
 
         async function init() {
-            const initBtn = document.getElementById("init-btn");
-            initBtn.innerText = "載入中，請稍候...";
-            initBtn.disabled = true;
-            document.getElementById("status-display").innerText = "正在下載 AI 模型...";
+            document.getElementById("init-btn").innerText = "載入中，請稍候...";
+            document.getElementById("init-btn").disabled = true;
 
             try {
                 model = await tmPose.load(URL + "model.json", URL + "metadata.json");
                 maxPredictions = model.getTotalClasses();
-                await setupCamera(currentFacingMode);
-            } catch (error) {
-                showError("無法載入 AI 模型，請檢查網路狀態。");
-                initBtn.innerText = "重新嘗試啟動";
-                initBtn.disabled = false;
-            }
-        }
-
-        async function setupCamera(facingMode) {
-            document.getElementById("status-display").innerText = "正在請求相機權限...";
-            isLooping = false; 
-            if (animationFrameId) window.cancelAnimationFrame(animationFrameId);
-            if (webcam) { try { await webcam.stop(); } catch(e) {} }
-
-            const camWidth = 480;
-            const camHeight = 640;
-            
-            try {
-                webcam = new tmPose.Webcam(camWidth, camHeight, false); 
-                await webcam.setup({ facingMode: facingMode });
+                
+                webcam = new tmPose.Webcam(480, 640, false); // AI 吃原始影像不翻轉
+                await webcam.setup({ facingMode: "environment" }); // 強制呼叫後置鏡頭
                 await webcam.play();
-            } catch (err1) {
-                console.warn(facingMode + " 鏡頭啟動失敗，嘗試切換...", err1);
-                try {
-                    let backupMode = (facingMode === "environment") ? "user" : "environment";
-                    currentFacingMode = backupMode; 
-                    webcam = new tmPose.Webcam(camWidth, camHeight, false); 
-                    await webcam.setup({ facingMode: backupMode });
-                    await webcam.play();
-                } catch (err2) {
-                    showError("相機權限被拒絕，或瀏覽器不支援。");
-                    document.getElementById("init-btn").innerText = "啟動失敗";
-                    return; 
-                }
+                window.requestAnimationFrame(loop);
+
+                const canvas = document.getElementById("canvas");
+                canvas.width = 480; 
+                canvas.height = 640;
+                ctx = canvas.getContext("2d");
+
+                document.getElementById("init-btn").style.display = "none";
+                document.getElementById("start-btn").disabled = false;
+                document.getElementById("status-display").innerText = "準備就緒！";
+                document.getElementById("status-display").style.color = "#27ae60";
+
+            } catch (error) {
+                alert("相機啟動失敗，請確認已允許瀏覽器相機權限。");
+                document.getElementById("init-btn").innerText = "點此重新啟動";
+                document.getElementById("init-btn").disabled = false;
             }
-            
-            document.getElementById("error-panel").style.display = "none";
-            const canvas = document.getElementById("canvas");
-            canvas.width = camWidth; 
-            canvas.height = camHeight;
-            ctx = canvas.getContext("2d");
-            
-            document.getElementById("init-btn").style.display = "none";
-            document.getElementById("start-btn").disabled = false;
-            
-            let modeText = (currentFacingMode === "user") ? "前置鏡頭" : "後置鏡頭";
-            document.getElementById("status-display").innerText = `準備就緒！(${modeText})`;
-            document.getElementById("status-display").style.color = "#27ae60";
-
-            isLooping = true;
-            loop();
-        }
-
-        async function switchCamera() {
-            document.getElementById("status-display").innerText = "切換鏡頭中...";
-            currentFacingMode = (currentFacingMode === "user") ? "environment" : "user";
-            await setupCamera(currentFacingMode);
         }
 
         async function startTest() {
@@ -181,7 +127,7 @@
             count = 0;
             timeLeft = 30.0;
             isTesting = true;
-            hasStood = false; 
+            currentState = "Sit"; // 預設一開始長輩是坐著的
             
             document.getElementById("count-display").innerText = "0";
             document.getElementById("status-display").innerText = "測驗進行中...";
@@ -200,41 +146,31 @@
         function finishTest() {
             clearInterval(timerInterval);
             isTesting = false;
-            timeLeft = 0;
             document.getElementById("timer-display").innerText = "0.0";
-            document.getElementById("status-display").innerText = "資料自動上傳中...";
-            document.getElementById("status-display").style.color = "#f39c12"; 
+            document.getElementById("status-display").innerText = "測驗結束，上傳中...";
             
-            if (window.navigator.vibrate) window.navigator.vibrate(500);
-
             let elderName = document.getElementById("elder-name").value || "未具名長輩";
             const requestUrl = `${GAS_API_URL}?name=${encodeURIComponent(elderName)}&count=${count}`;
 
             fetch(requestUrl, { method: 'GET', mode: 'no-cors' })
                 .then(() => {
-                    document.getElementById("status-display").innerText = "✅ 資料已成功存入雲端！";
-                    document.getElementById("status-display").style.color = "#27ae60";
-                    alert(`測驗完成！\n姓名：${elderName}\n次數：${count} 次`);
-                    resetUI();
+                    alert(`測驗完成！\n姓名：${elderName}\n次數：${count} 次\n\n(資料已上傳)`);
+                    document.getElementById("start-btn").disabled = false;
+                    document.getElementById("start-btn").innerText = "重新進行測驗";
+                    document.getElementById("status-display").innerText = "等待下一位測試...";
+                    document.getElementById("status-display").style.color = "#7f8c8d";
                 })
                 .catch(error => {
-                    document.getElementById("status-display").innerText = "⚠️ 上傳失敗";
-                    resetUI();
+                    alert("上傳失敗，請檢查網路！");
+                    document.getElementById("start-btn").disabled = false;
+                    document.getElementById("start-btn").innerText = "重新進行測驗";
                 });
         }
 
-        function resetUI() {
-            document.getElementById("start-btn").disabled = false;
-            document.getElementById("start-btn").innerText = "重新進行測驗";
-            document.getElementById("elder-name").value = ""; 
-        }
-
         async function loop() {
-            if (isLooping && webcam && webcam.canvas) {
-                webcam.update(); 
-                await predict();
-                animationFrameId = window.requestAnimationFrame(loop);
-            }
+            webcam.update(); 
+            await predict();
+            window.requestAnimationFrame(loop);
         }
 
         async function predict() {
@@ -251,36 +187,29 @@
                 }
             }
 
-            // 🚨 將 AI 的內心世界印在畫面上
-            document.getElementById("ai-debug").innerText = `👀 AI 看到：[ ${detectedPose} ] 信心度：${(highestProbability * 100).toFixed(0)}%`;
-
+            // 【完全退回你最滿意的那一版超單純判斷邏輯】
             if (highestProbability > CONFIDENCE_THRESHOLD) {
-                
-                // 【嚴格對比字串】包含你可能不小心打錯的標籤
                 if (detectedPose === "Stand" || detectedPose === "站立" || detectedPose === "起立" || detectedPose === "Class 1") {
-                    if (isTesting) {
-                        hasStood = true; 
-                    }
+                    currentState = "Stand";
                 } 
                 else if (detectedPose === "Sit" || detectedPose === "坐下" || detectedPose === "Class 2") {
-                    if (isTesting && hasStood) {
+                    // 只要上一秒是站立，現在是坐下，立刻加一次！
+                    if (currentState === "Stand" && isTesting) {
                         count++;
                         document.getElementById("count-display").innerText = count;
-                        hasStood = false; 
                     }
+                    currentState = "Sit"; // 歸位
+                }
+                else {
+                    currentState = "None";
                 }
             }
 
-            drawPose(pose);
-        }
-
-        function drawPose(pose) {
             if (webcam.canvas) {
                 ctx.drawImage(webcam.canvas, 0, 0);
                 if (pose) {
-                    const minPartConfidence = 0.5;
-                    tmPose.drawKeypoints(pose.keypoints, minPartConfidence, ctx, 6);
-                    tmPose.drawSkeleton(pose.keypoints, minPartConfidence, ctx, 4);
+                    tmPose.drawKeypoints(pose.keypoints, 0.5, ctx, 6);
+                    tmPose.drawSkeleton(pose.keypoints, 0.5, ctx, 4);
                 }
             }
         }
