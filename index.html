@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>高齡 30 秒椅子站立檢測系統 (全環境適應版)</title>
+    <title>高齡 30 秒椅子站立檢測 (穩定復活版)</title>
     <style>
         body { 
             font-family: '微軟正黑體', sans-serif; 
@@ -23,7 +23,6 @@
             border-radius: 8px; border: 2px solid #bdc3c7; text-align: center; box-sizing: border-box;
         }
 
-        /* 控制面板：按鈕並排 */
         .control-panel {
             display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-bottom: 15px; width: 100%; max-width: 480px; margin: 0 auto 15px auto;
         }
@@ -46,6 +45,9 @@
             transition: transform 0.3s ease; 
         }
 
+        /* 欺騙視覺用的左右翻轉 */
+        .flipped { transform: scaleX(-1); }
+
         #overlay-text {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
             font-size: 100px; color: white; font-weight: bold; text-shadow: 0 0 20px rgba(0,0,0,0.8); display: none; pointer-events: none;
@@ -63,8 +65,8 @@
     <button id="start-btn" type="button" onclick="startTest()">開始 30 秒測驗</button>
 
     <div class="control-panel">
-        <button class="tool-btn" onclick="toggleCamera()">🔄 切換前後鏡頭</button>
-        <button class="tool-btn" onclick="toggleVisualFlip()">🪞 切換畫面鏡像</button>
+        <button class="tool-btn" onclick="switchCamera()">🔄 切換前後鏡頭</button>
+        <button class="tool-btn" onclick="toggleVisualFlip()">🪞 切換畫面方向</button>
     </div>
 
     <div id="canvas-container">
@@ -87,99 +89,182 @@
         let timerInterval = null;
         const CONFIDENCE_THRESHOLD = 0.85;
 
-        // 相機狀態變數
-        let useRearCamera = true; // 預設嘗試後置
-        let isFlipped = false;    // 預設螢幕不翻轉
+        // 當前相機模式 (預設為前置，最安全)
+        let currentFacingMode = "user"; 
 
         window.onload = init;
 
+        // 視覺翻轉
+        function toggleVisualFlip() {
+            document.getElementById("canvas").classList.toggle("flipped");
+        }
+
         async function init() {
-            document.getElementById("start-btn").innerText = "模型載入中...";
+            document.getElementById("start-btn").innerText = "模型與相機載入中...";
             document.getElementById("start-btn").disabled = true;
 
             try {
                 model = await tmPose.load(URL + "model.json", URL + "metadata.json");
                 maxPredictions = model.getTotalClasses();
                 
-                // 啟動相機 (包含防呆自動備援機制)
-                await startWebcam();
+                // 啟動相機 (預設前置)
+                await setupCamera(currentFacingMode);
 
             } catch (error) {
-                alert("模型載入失敗，請檢查網路。");
+                alert("啟動失敗，請檢查網路或確保瀏覽器允許相機權限。");
                 console.error(error);
+                document.getElementById("status-display").innerText = "載入失敗";
             }
         }
 
-        async function startWebcam() {
+        // 獨立出的相機啟動模組，避免當機
+        async function setupCamera(facingMode) {
             document.getElementById("status-display").innerText = "相機啟動中...";
             
             if (webcam) {
-                webcam.stop(); // 若切換鏡頭，先停止舊的
+                webcam.stop(); // 切換鏡頭前先關閉舊的
             }
 
             const camWidth = 480;
             const camHeight = 640;
             
-            // AI 永遠讀取最真實的原始數據，不翻轉
+            // AI 讀取原始數據不翻轉
             webcam = new tmPose.Webcam(camWidth, camHeight, false); 
 
             try {
                 // 嘗試啟動指定的鏡頭
-                await webcam.setup({ facingMode: useRearCamera ? "environment" : "user" });
-            } catch (e) {
-                console.warn("找不到指定鏡頭，啟動備援機制...", e);
-                // 防呆機制：如果找不到後置鏡頭(例如用電腦測)，自動切換回前置鏡頭
-                useRearCamera = !useRearCamera;
-                try {
-                    await webcam.setup({ facingMode: useRearCamera ? "environment" : "user" });
-                    alert("找不到指定的鏡頭，已自動為您切換至可用鏡頭！(電腦測試通常無後置鏡頭)");
-                } catch (err) {
-                    alert("相機完全無法啟動，請檢查瀏覽器權限設定。");
-                    return;
-                }
+                await webcam.setup({ facingMode: facingMode });
+                await webcam.play();
+                
+                // 成功啟動後，綁定畫布
+                const canvas = document.getElementById("canvas");
+                canvas.width = camWidth; 
+                canvas.height = camHeight;
+                ctx = canvas.getContext("2d");
+                
+                // 開始影像循環
+                window.requestAnimationFrame(loop);
+
+                document.getElementById("start-btn").innerText = "開始 30 秒測驗";
+                document.getElementById("start-btn").disabled = false;
+                
+                let modeText = (facingMode === "user") ? "前置鏡頭" : "後置鏡頭";
+                document.getElementById("status-display").innerText = `準備就緒！(${modeText})`;
+                document.getElementById("status-display").style.color = "#27ae60";
+
+            } catch (err) {
+                console.error("相機啟動錯誤:", err);
+                alert(`無法啟動指定的相機！\n(如果桌機沒有後置鏡頭，請點擊「切換前後鏡頭」按鈕)`);
             }
+        }
+
+        // 手動切換前後鏡頭
+        async function switchCamera() {
+            document.getElementById("start-btn").disabled = true;
+            document.getElementById("status-display").innerText = "鏡頭切換中...";
             
-            await webcam.play();
-            window.requestAnimationFrame(loop);
-
-            const canvas = document.getElementById("canvas");
-            canvas.width = camWidth; 
-            canvas.height = camHeight;
-            ctx = canvas.getContext("2d");
-
-            document.getElementById("start-btn").innerText = "開始 30 秒測驗";
-            document.getElementById("start-btn").disabled = false;
-            document.getElementById("status-display").innerText = useRearCamera ? "準備就緒！(後置鏡頭)" : "準備就緒！(前置鏡頭)";
-            document.getElementById("status-display").style.color = "#27ae60";
-
-            updateCanvasFlip(); // 套用視覺翻轉設定
+            // 切換模式
+            currentFacingMode = (currentFacingMode === "user") ? "environment" : "user";
+            await setupCamera(currentFacingMode);
         }
 
-        // --- 實務控制按鈕功能 ---
-        async function toggleCamera() {
-            useRearCamera = !useRearCamera;
-            await startWebcam();
-        }
-
-        function toggleVisualFlip() {
-            isFlipped = !isFlipped;
-            updateCanvasFlip();
-        }
-
-        function updateCanvasFlip() {
-            const canvas = document.getElementById("canvas");
-            // 這只是 CSS 視覺欺騙，不影響 AI 判斷
-            canvas.style.transform = isFlipped ? "scaleX(-1)" : "scaleX(1)";
-        }
-        // -----------------------
-
+        // --- 測驗與計數邏輯 ---
         async function startTest() {
             let elderName = document.getElementById("elder-name").value;
             if (elderName.trim() === "") {
-                let confirmStart = confirm("您尚未輸入長輩姓名，要以「未具名」直接開始測驗嗎？");
+                let confirmStart = confirm("尚未輸入姓名，要以「未具名」開始嗎？");
                 if (!confirmStart) return;
             }
 
             document.getElementById("start-btn").disabled = true;
             const overlay = document.getElementById("overlay-text");
-            overlay.style.display = "block
+            overlay.style.display = "block";
+            
+            for (let i = 3; i > 0; i--) {
+                overlay.innerText = i;
+                await new Promise(r => setTimeout(r, 1000));
+            }
+            
+            overlay.innerText = "GO!";
+            setTimeout(() => { overlay.style.display = "none"; }, 800);
+
+            count = 0;
+            timeLeft = 30.0;
+            isTesting = true;
+            currentState = "Sit"; 
+            
+            document.getElementById("count-display").innerText = "0";
+            document.getElementById("status-display").innerText = "測驗進行中...";
+            document.getElementById("status-display").style.color = "#e74c3c";
+
+            timerInterval = setInterval(() => {
+                timeLeft -= 0.1;
+                if (timeLeft <= 0) {
+                    finishTest();
+                } else {
+                    document.getElementById("timer-display").innerText = timeLeft.toFixed(1);
+                }
+            }, 100);
+        }
+
+        function finishTest() {
+            clearInterval(timerInterval);
+            isTesting = false;
+            timeLeft = 0;
+            document.getElementById("timer-display").innerText = "0.0";
+            document.getElementById("status-display").innerText = "資料自動上傳中...";
+            document.getElementById("status-display").style.color = "#f39c12"; 
+            
+            if (window.navigator.vibrate) window.navigator.vibrate(500);
+
+            let elderName = document.getElementById("elder-name").value || "未具名長輩";
+            const requestUrl = `${GAS_API_URL}?name=${encodeURIComponent(elderName)}&count=${count}`;
+
+            fetch(requestUrl, { method: 'GET', mode: 'no-cors' })
+                .then(() => {
+                    document.getElementById("status-display").innerText = "✅ 資料已成功存入雲端！";
+                    document.getElementById("status-display").style.color = "#27ae60";
+                    alert(`測驗完成！\n姓名：${elderName}\n次數：${count} 次`);
+                    resetUI();
+                })
+                .catch(error => {
+                    console.error("上傳失敗:", error);
+                    document.getElementById("status-display").innerText = "⚠️ 上傳失敗";
+                    resetUI();
+                });
+        }
+
+        function resetUI() {
+            document.getElementById("start-btn").disabled = false;
+            document.getElementById("start-btn").innerText = "重新進行測驗";
+            document.getElementById("elder-name").value = ""; 
+        }
+
+        async function loop(timestamp) {
+            if (webcam && webcam.canvas) {
+                webcam.update(); 
+                await predict();
+            }
+            window.requestAnimationFrame(loop);
+        }
+
+        async function predict() {
+            const { pose, posenetOutput } = await model.estimatePose(webcam.canvas);
+            const prediction = await model.predict(posenetOutput);
+
+            let detectedPose = "None";
+            let highestProbability = 0;
+
+            for (let i = 0; i < maxPredictions; i++) {
+                if (prediction[i].probability > highestProbability) {
+                    highestProbability = prediction[i].probability;
+                    detectedPose = prediction[i].className; 
+                }
+            }
+
+            // 極致靈敏計數邏輯
+            if (highestProbability > CONFIDENCE_THRESHOLD) {
+                if (detectedPose === "Stand" || detectedPose === "站立" || detectedPose === "起立") {
+                    currentState = "Stand";
+                } 
+                else if (detectedPose === "Sit" || detected
