@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>高齡 30 秒椅子站立檢測 (高敏完美版)</title>
+    <title>高齡 30 秒椅子站立檢測 (防呆不崩潰版)</title>
     <style>
         body { font-family: '微軟正黑體', sans-serif; text-align: center; background-color: #f4f6f9; margin: 0; padding: 10px; }
         .input-group { margin: 15px auto; width: 90%; max-width: 400px; text-align: left; }
@@ -51,7 +51,7 @@
     <button onclick="document.getElementById('canvas').classList.toggle('flipped')" style="background:#3498db; font-size:16px; padding:10px; margin-bottom:10px; color:white; border:none; border-radius:8px;">🪞 切換螢幕左右方向</button>
 
     <div id="canvas-container">
-        <video id="native-video" playsinline autoplay muted style="display:none;"></video>
+        <video id="native-video" playsinline autoplay muted style="position: absolute; width: 0; height: 0; visibility: hidden;"></video>
         <canvas id="canvas"></canvas>
     </div>
 
@@ -81,12 +81,9 @@
 
                 videoElement.onloadedmetadata = () => {
                     videoElement.play(); 
-                    
-                    videoElement.width = videoElement.videoWidth || 480;
-                    videoElement.height = videoElement.videoHeight || 640;
-                    canvas.width = videoElement.width; 
-                    canvas.height = videoElement.height;
-                    
+                    // 確保 canvas 取得相機真實尺寸
+                    canvas.width = videoElement.videoWidth || 480; 
+                    canvas.height = videoElement.videoHeight || 640;
                     ctx = canvas.getContext("2d");
                     
                     document.getElementById("init-btn").style.display = "none";
@@ -140,50 +137,48 @@
             }, 50);
         }
 
+        // 加入 try...catch 保護，就算 AI 報錯也不會導致畫面凍結！
         async function loop() {
             try {
                 if (videoElement.readyState >= 2) { 
                     await predict();
                 }
             } catch (err) {
-                console.error("略過異常影格:", err);
+                console.error("AI 辨識發生小錯誤，已略過此影格:", err);
             }
             await new Promise(resolve => setTimeout(resolve, 0)); 
             window.requestAnimationFrame(loop);
         }
 
         async function predict() {
+            // 第一步：不管三七二十一，先畫相機底圖！避免白畫面
             ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
 
-            const { pose, posenetOutput } = await model.estimatePose(canvas);
+            const { pose, posenetOutput } = await model.estimatePose(videoElement);
 
+            // 第二步：確保有抓到骨架，才畫骨架和進行辨識 (防崩潰核心)
             if (pose && posenetOutput) {
-                tmPose.drawKeypoints(pose.keypoints, 0.5, ctx);
-                tmPose.drawSkeleton(pose.keypoints, 0.5, ctx);
+                // 畫出骨架
+                tmPose.drawKeypoints(pose.keypoints, 0.5, ctx, 6);
+                tmPose.drawSkeleton(pose.keypoints, 0.5, ctx, 4);
 
                 const prediction = await model.predict(posenetOutput);
                 
+                // 確保預測結果不為空
                 if (prediction && prediction.length > 0) {
                     let bestPred = prediction.reduce((prev, current) => (prev.probability > current.probability) ? prev : current);
-                    
-                    // 轉小寫方便做模糊比對
-                    let aiNameRaw = bestPred.className;
-                    let aiNameLower = aiNameRaw.toLowerCase(); 
+                    let aiName = bestPred.className; 
                     let aiScore = Math.round(bestPred.probability * 100);
 
                     let flagText = hasStoodUp ? "【已起身，待坐下】" : "【等待起身】";
-                    document.getElementById("debug-panel").innerText = `AI 看到：${aiNameRaw} (${aiScore}%) \n 邏輯狀態：${flagText}`;
+                    document.getElementById("debug-panel").innerText = `AI 看到：${aiName} (${aiScore}%) \n 邏輯狀態：${flagText}`;
 
-                    // --- 恢復高敏感度模糊比對 ---
-                    let isStanding = aiNameLower.includes("stand") || aiNameLower.includes("站") || aiNameLower.includes("起") || aiNameLower.includes("1") || aiNameLower.includes("up");
-                    let isSitting = aiNameLower.includes("sit") || aiNameLower.includes("坐") || aiNameLower.includes("下") || aiNameLower.includes("2") || aiNameLower.includes("down");
-
-                    // 只要大於 50% 信心度就採納 (增加靈敏度)
-                    if (isTesting && bestPred.probability > 0.50) {
-                        if (isStanding) {
+                    // --- 精準計數邏輯 ---
+                    if (isTesting && bestPred.probability > 0.60) {
+                        if (aiName === "站力") {
                             hasStoodUp = true; 
                         } 
-                        else if (isSitting) {
+                        else if (aiName === "坐下") {
                             if (hasStoodUp) {
                                 count++;
                                 document.getElementById("count-display").innerText = count;
@@ -192,6 +187,8 @@
                         }
                     }
                 }
+            } else {
+                document.getElementById("debug-panel").innerText = "未偵測到完整人體骨架...";
             }
         }
     </script>
