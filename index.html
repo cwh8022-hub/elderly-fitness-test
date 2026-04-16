@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>高齡 30 秒椅子站立檢測 (原廠超靈敏版)</title>
+    <title>高齡 30 秒椅子站立檢測 (極簡原廠版)</title>
     <style>
         body { font-family: '微軟正黑體', sans-serif; text-align: center; background-color: #f4f6f9; margin: 0; padding: 10px; overscroll-behavior-y: contain; }
         .timer-box { font-size: 60px; color: #e67e22; font-weight: bold; margin-top: 5px; text-shadow: 1px 1px 2px rgba(0,0,0,0.1); }
@@ -15,20 +15,17 @@
         .btn-group { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 15px; width: 100%; }
         
         button { font-size: 20px; padding: 15px 0; width: 90%; max-width: 400px; color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        
         #init-btn { background-color: #e67e22; }
         #init-btn:disabled { background-color: #f39c12; cursor: wait; }
         #start-btn { background-color: #27ae60; }
         #start-btn:disabled { background-color: #95a5a6; cursor: not-allowed; }
 
-        .control-panel { display: flex; justify-content: center; width: 100%; max-width: 480px; margin: 0 auto 15px auto; }
-        .tool-btn { background-color: #3498db; font-size: 16px; padding: 10px; width: 90%; border-radius: 8px; }
-
         #canvas-container { margin: 0 auto; display: flex; justify-content: center; width: 100%; max-width: 480px; position: relative; }
-        canvas { border-radius: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); background-color: #000; width: 100%; height: auto; transition: transform 0.3s ease; }
         
-        /* 切換畫面左右用的 */
-        .flipped { transform: scaleX(-1); }
-
+        /* 拔除所有複雜的 CSS 翻轉，回歸最純粹的畫布 */
+        canvas { border-radius: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); background-color: #000; width: 100%; height: auto; }
+        
         #overlay-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 100px; color: white; font-weight: bold; text-shadow: 0 0 20px rgba(0,0,0,0.8); display: none; pointer-events: none; }
     </style>
 </head>
@@ -41,12 +38,8 @@
     <input type="text" id="elder-name" placeholder="請輸入受測長輩姓名">
 
     <div class="btn-group">
-        <button id="init-btn" onclick="init()">點此啟動相機 (iPhone 專用)</button>
-        <button id="start-btn" onclick="startTest()" disabled>開始 30 秒測驗</button>
-    </div>
-
-    <div class="control-panel">
-        <button class="tool-btn" onclick="toggleVisualFlip()">🪞 切換螢幕左右方向 (方便對準)</button>
+        <button id="init-btn" type="button" onclick="init()">1. 點此開啟相機 (iPhone 必點)</button>
+        <button id="start-btn" type="button" onclick="startTest()" disabled>2. 開始 30 秒測驗</button>
     </div>
 
     <div id="canvas-container">
@@ -63,28 +56,23 @@
         
         let model, webcam, ctx, maxPredictions;
         let count = 0;
-        let currentState = "None"; // 退回你最愛的原始核心邏輯
+        let currentState = "None"; // 乾乾淨淨的狀態變數
         let isTesting = false; 
         let timeLeft = 30.0;
         let timerInterval = null;
-        
-        // 恢復最初的高門檻，確保只有標準動作才計數
-        const CONFIDENCE_THRESHOLD = 0.85; 
-
-        function toggleVisualFlip() {
-            document.getElementById("canvas").classList.toggle("flipped");
-        }
 
         async function init() {
-            document.getElementById("init-btn").innerText = "載入中，請稍候...";
-            document.getElementById("init-btn").disabled = true;
+            const initBtn = document.getElementById("init-btn");
+            initBtn.innerText = "相機與模型載入中...";
+            initBtn.disabled = true;
 
             try {
                 model = await tmPose.load(URL + "model.json", URL + "metadata.json");
                 maxPredictions = model.getTotalClasses();
                 
-                webcam = new tmPose.Webcam(480, 640, false); // AI 吃原始影像不翻轉
-                await webcam.setup({ facingMode: "environment" }); // 強制呼叫後置鏡頭
+                // 最純粹的後置鏡頭設定：不翻轉畫面，直接吃真實影像
+                webcam = new tmPose.Webcam(480, 640, false); 
+                await webcam.setup({ facingMode: "environment" }); 
                 await webcam.play();
                 window.requestAnimationFrame(loop);
 
@@ -93,15 +81,15 @@
                 canvas.height = 640;
                 ctx = canvas.getContext("2d");
 
-                document.getElementById("init-btn").style.display = "none";
+                initBtn.style.display = "none";
                 document.getElementById("start-btn").disabled = false;
-                document.getElementById("status-display").innerText = "準備就緒！";
+                document.getElementById("status-display").innerText = "相機已啟動，請對準受測者";
                 document.getElementById("status-display").style.color = "#27ae60";
 
             } catch (error) {
-                alert("相機啟動失敗，請確認已允許瀏覽器相機權限。");
-                document.getElementById("init-btn").innerText = "點此重新啟動";
-                document.getElementById("init-btn").disabled = false;
+                alert("相機開啟失敗！請確認 Safari 是否允許此網頁使用相機。");
+                initBtn.innerText = "重試開啟相機";
+                initBtn.disabled = false;
             }
         }
 
@@ -127,7 +115,7 @@
             count = 0;
             timeLeft = 30.0;
             isTesting = true;
-            currentState = "Sit"; // 預設一開始長輩是坐著的
+            currentState = "Sit"; // 預設受測者一開始是坐著的
             
             document.getElementById("count-display").innerText = "0";
             document.getElementById("status-display").innerText = "測驗進行中...";
@@ -147,23 +135,26 @@
             clearInterval(timerInterval);
             isTesting = false;
             document.getElementById("timer-display").innerText = "0.0";
-            document.getElementById("status-display").innerText = "測驗結束，上傳中...";
+            document.getElementById("status-display").innerText = "上傳資料中...";
             
+            if (window.navigator.vibrate) window.navigator.vibrate(500);
+
             let elderName = document.getElementById("elder-name").value || "未具名長輩";
             const requestUrl = `${GAS_API_URL}?name=${encodeURIComponent(elderName)}&count=${count}`;
 
             fetch(requestUrl, { method: 'GET', mode: 'no-cors' })
                 .then(() => {
-                    alert(`測驗完成！\n姓名：${elderName}\n次數：${count} 次\n\n(資料已上傳)`);
+                    alert(`測驗完成！\n姓名：${elderName}\n次數：${count} 次\n\n資料已成功上傳！`);
                     document.getElementById("start-btn").disabled = false;
-                    document.getElementById("start-btn").innerText = "重新進行測驗";
-                    document.getElementById("status-display").innerText = "等待下一位測試...";
+                    document.getElementById("start-btn").innerText = "測驗下一位";
+                    document.getElementById("status-display").innerText = "等待下一次測驗";
                     document.getElementById("status-display").style.color = "#7f8c8d";
+                    document.getElementById("elder-name").value = ""; 
                 })
-                .catch(error => {
-                    alert("上傳失敗，請檢查網路！");
+                .catch(() => {
+                    alert("網路異常，上傳失敗！");
                     document.getElementById("start-btn").disabled = false;
-                    document.getElementById("start-btn").innerText = "重新進行測驗";
+                    document.getElementById("start-btn").innerText = "重新測驗";
                 });
         }
 
@@ -187,24 +178,24 @@
                 }
             }
 
-            // 【完全退回你最滿意的那一版超單純判斷邏輯】
-            if (highestProbability > CONFIDENCE_THRESHOLD) {
+            // 【完全還原：最原始、最直覺的超靈敏計數邏輯】
+            if (highestProbability > 0.80) { 
+                // 抓取可能的所有站立標籤名稱
                 if (detectedPose === "Stand" || detectedPose === "站立" || detectedPose === "起立" || detectedPose === "Class 1") {
                     currentState = "Stand";
                 } 
+                // 抓取可能的所有坐下標籤名稱
                 else if (detectedPose === "Sit" || detectedPose === "坐下" || detectedPose === "Class 2") {
-                    // 只要上一秒是站立，現在是坐下，立刻加一次！
+                    // 只要上一秒是站立，現在偵測到坐下，立刻 +1
                     if (currentState === "Stand" && isTesting) {
                         count++;
                         document.getElementById("count-display").innerText = count;
                     }
-                    currentState = "Sit"; // 歸位
-                }
-                else {
-                    currentState = "None";
+                    currentState = "Sit"; // 狀態歸位
                 }
             }
 
+            // 畫骨架 (移除所有干擾判斷的翻轉錯位)
             if (webcam.canvas) {
                 ctx.drawImage(webcam.canvas, 0, 0);
                 if (pose) {
