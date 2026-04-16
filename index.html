@@ -16,13 +16,12 @@
 
         .status-box { font-size: 18px; color: #7f8c8d; font-weight: bold; height: 25px; margin-bottom: 10px; }
         .btn-group { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 15px; width: 100%; }
-        button { font-size: 20px; padding: 15px 0; width: 90%; max-width: 400px; color: white; border: none; border-radius: 12px; font-weight: bold; }
+        button { font-size: 20px; padding: 15px 0; width: 90%; max-width: 400px; color: white; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; }
         #init-btn { background-color: #e67e22; }
         #start-btn { background-color: #27ae60; }
-        #start-btn:disabled { background-color: #95a5a6; }
+        #start-btn:disabled { background-color: #95a5a6; cursor: not-allowed; }
         
         #canvas-container { margin: 0 auto; display: flex; justify-content: center; width: 100%; max-width: 480px; position: relative; }
-        /* 讓畫布自動適應原生相機比例 */
         canvas { border-radius: 15px; background-color: #000; width: 100%; height: auto; }
         .flipped { transform: scaleX(-1); }
     </style>
@@ -57,7 +56,6 @@
         let count = 0;
         let currentState = "None"; 
         let isTesting = false; 
-        let timeLeft = 30.0;
         let timerInterval = null;
 
         async function init() {
@@ -68,14 +66,16 @@
                 // 1. 載入模型
                 model = await tmPose.load(URL + "model.json", URL + "metadata.json");
                 
-                // 2. 開除 tmPose.Webcam，改用純 HTML5 原生相機呼叫！
+                // 2. 呼叫原生相機
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: "environment" } // 強制後置鏡頭
+                    video: { facingMode: "environment" } 
                 });
                 videoElement.srcObject = stream;
 
-                // 3. 等待鏡頭畫面載入，並將畫布大小「完美對齊」相機的真實比例，拒絕擠壓！
+                // 3. 等待鏡頭畫面載入
                 videoElement.onloadedmetadata = () => {
+                    videoElement.play(); // 【關鍵修復1】強制啟動影片播放，否則畫面會永遠凍結在第一影格！
+
                     const canvas = document.getElementById("canvas");
                     canvas.width = videoElement.videoWidth; 
                     canvas.height = videoElement.videoHeight;
@@ -85,12 +85,10 @@
                     document.getElementById("start-btn").disabled = false;
                     document.getElementById("status-display").innerText = "相機已啟動！";
                     
-                    // 開始影像辨識迴圈
                     window.requestAnimationFrame(loop);
                 };
-
             } catch (error) {
-                alert("相機開啟失敗！請檢查 Safari 權限設定。");
+                alert("相機開啟失敗！請檢查權限設定。");
                 document.getElementById("init-btn").innerText = "重試開啟相機";
                 document.getElementById("init-btn").disabled = false;
             }
@@ -99,14 +97,21 @@
         async function startTest() {
             document.getElementById("start-btn").disabled = true;
             count = 0;
-            timeLeft = 30.0;
             isTesting = true;
             currentState = "Sit"; 
             document.getElementById("count-display").innerText = "0";
             document.getElementById("status-display").innerText = "測驗進行中...";
 
+            // 【關鍵修復2】改用真實時間 (Date.now()) 來倒數，避免被 AI 運算卡死
+            let startTime = Date.now();
+            let duration = 30000; // 30秒
+
+            if(timerInterval) clearInterval(timerInterval);
+            
             timerInterval = setInterval(() => {
-                timeLeft -= 0.1;
+                let passedTime = Date.now() - startTime;
+                let timeLeft = Math.max(0, (duration - passedTime) / 1000);
+
                 if (timeLeft <= 0) {
                     clearInterval(timerInterval);
                     isTesting = false;
@@ -117,18 +122,19 @@
                 } else {
                     document.getElementById("timer-display").innerText = timeLeft.toFixed(1);
                 }
-            }, 100);
+            }, 50); // 加快更新頻率讓 UI 更順暢
         }
 
         async function loop() {
-            if (videoElement.readyState >= 2) { // 確保有影像才判斷
+            if (videoElement.readyState >= 2) { 
                 await predict();
             }
+            // 【關鍵修復3】稍微暫停 0 毫秒，強迫 AI 讓出資源給瀏覽器更新畫面與計時器
+            await new Promise(resolve => setTimeout(resolve, 0)); 
             window.requestAnimationFrame(loop);
         }
 
         async function predict() {
-            // 直接餵給 AI「無擠壓的真實影像」
             const { pose, posenetOutput } = await model.estimatePose(videoElement);
             const prediction = await model.predict(posenetOutput);
 
@@ -145,6 +151,7 @@
                     currentState = "Stand";
                 } 
                 else if (nameLower.includes("sit") || nameLower.includes("坐") || nameLower.includes("2")) {
+                    // 計數邏輯：必須是「先站起來」然後「坐下去」才算完成一次 (完整循環)
                     if (currentState === "Stand" && isTesting) {
                         count++;
                         document.getElementById("count-display").innerText = count;
@@ -153,7 +160,6 @@
                 }
             }
 
-            // 畫出影像與骨架
             ctx.drawImage(videoElement, 0, 0, document.getElementById("canvas").width, document.getElementById("canvas").height);
             if (pose) {
                 tmPose.drawKeypoints(pose.keypoints, 0.5, ctx, 6);
