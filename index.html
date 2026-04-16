@@ -2,40 +2,26 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>30秒椅子站立測試 (還原最初穩定版)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>30秒椅子站立測試 (原始邏輯版)</title>
     <style>
-        body { font-family: '微軟正黑體', sans-serif; text-align: center; background-color: #f4f6f9; margin: 0; padding: 10px; overscroll-behavior-y: contain; }
-        .timer-box { font-size: 60px; color: #e67e22; font-weight: bold; margin-top: 5px; }
-        .counter-box { font-size: 45px; color: #2c3e50; font-weight: bold; margin: 5px 0; }
-        .status-box { font-size: 18px; color: #7f8c8d; font-weight: bold; height: 25px; margin-bottom: 15px; }
-        #elder-name { font-size: 20px; padding: 12px; margin-bottom: 15px; width: 90%; max-width: 400px; border-radius: 8px; border: 2px solid #bdc3c7; text-align: center; box-sizing: border-box; }
-        .btn-group { display: flex; flex-direction: column; align-items: center; gap: 10px; margin-bottom: 15px; width: 100%; }
-        button { font-size: 22px; padding: 15px 0; width: 90%; max-width: 400px; color: white; border: none; border-radius: 12px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        #init-btn { background-color: #e67e22; }
-        #start-btn { background-color: #27ae60; }
-        #start-btn:disabled { background-color: #95a5a6; cursor: not-allowed; }
-        #canvas-container { margin: 0 auto; display: flex; justify-content: center; width: 100%; max-width: 480px; position: relative; }
-        canvas { border-radius: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); background-color: #000; width: 100%; height: auto; }
-        #overlay-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 100px; color: white; font-weight: bold; text-shadow: 0 0 20px rgba(0,0,0,0.8); display: none; pointer-events: none; }
+        body { font-family: sans-serif; text-align: center; padding: 20px; }
+        #canvas-container { margin: 20px auto; width: 100%; max-width: 400px; }
+        canvas { width: 100%; border: 1px solid #ccc; border-radius: 10px; }
+        button { font-size: 20px; padding: 15px; width: 80%; margin: 10px; cursor: pointer; }
     </style>
 </head>
 <body>
 
-    <div class="timer-box" id="timer-display">30.0</div>
-    <div class="counter-box">次數：<span id="count-display">0</span></div>
-    <div class="status-box" id="status-display">等待啟動...</div>
+    <h1>次數：<span id="count-display">0</span></h1>
+    <h2 id="timer-display">30.0</h2>
+    <p id="status-display">等待啟動...</p>
 
-    <input type="text" id="elder-name" placeholder="請輸入受測長輩姓名">
-
-    <div class="btn-group">
-        <button id="init-btn" type="button" onclick="init()">點此啟動前置相機</button>
-        <button id="start-btn" type="button" onclick="startTest()" disabled>開始 30 秒測驗</button>
-    </div>
+    <button onclick="init()">1. 開啟相機</button>
+    <button id="start-btn" onclick="startTest()" disabled>2. 開始測驗</button>
 
     <div id="canvas-container">
         <canvas id="canvas"></canvas>
-        <div id="overlay-text">3</div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
@@ -43,105 +29,71 @@
 
     <script>
         const URL = "https://teachablemachine.withgoogle.com/models/m5xSQ1Ixr/";
-        const GAS_API_URL = "https://script.google.com/macros/s/AKfycby_qjVI2e5y8oLqOLMkB9Zrm6u6i6_RT5jVTleP1PO5zem226-xJIOi7fntufJm7GJHSA/exec";
-        
-        let model, webcam, ctx, maxPredictions;
+        let model, webcam, ctx;
         let count = 0;
         let currentState = "None"; 
         let isTesting = false; 
         let timeLeft = 30.0;
-        let timerInterval = null;
 
         async function init() {
-            document.getElementById("init-btn").innerText = "啟動中...";
-            document.getElementById("init-btn").disabled = true;
-
             try {
                 model = await tmPose.load(URL + "model.json", URL + "metadata.json");
-                maxPredictions = model.getTotalClasses();
-                
-                // 完全還原最初最穩定的前置鏡頭設定
-                webcam = new tmPose.Webcam(480, 640, true); 
+                webcam = new tmPose.Webcam(400, 400, true); 
                 await webcam.setup(); 
                 await webcam.play();
                 window.requestAnimationFrame(loop);
-
+                
                 const canvas = document.getElementById("canvas");
-                canvas.width = 480; 
-                canvas.height = 640;
+                canvas.width = 400; canvas.height = 400;
                 ctx = canvas.getContext("2d");
-
-                document.getElementById("init-btn").style.display = "none";
+                
                 document.getElementById("start-btn").disabled = false;
-                document.getElementById("status-display").innerText = "相機已啟動，請面對鏡頭";
-            } catch (error) {
-                alert("啟動失敗。");
-                document.getElementById("init-btn").disabled = false;
-            }
+                document.getElementById("status-display").innerText = "準備就緒";
+            } catch (e) { alert("啟動失敗"); }
         }
 
-        async function startTest() {
-            document.getElementById("start-btn").disabled = true;
-            const overlay = document.getElementById("overlay-text");
-            overlay.style.display = "block";
-            for (let i = 3; i > 0; i--) {
-                overlay.innerText = i;
-                await new Promise(r => setTimeout(r, 1000));
-            }
-            overlay.innerText = "GO!";
-            setTimeout(() => { overlay.style.display = "none"; }, 800);
-
+        function startTest() {
             count = 0;
             timeLeft = 30.0;
             isTesting = true;
-            currentState = "Sit"; 
             document.getElementById("count-display").innerText = "0";
-            document.getElementById("status-display").innerText = "測驗進行中...";
-
-            timerInterval = setInterval(() => {
+            
+            let timer = setInterval(() => {
                 timeLeft -= 0.1;
+                document.getElementById("timer-display").innerText = timeLeft.toFixed(1);
                 if (timeLeft <= 0) {
-                    clearInterval(timerInterval);
+                    clearInterval(timer);
                     isTesting = false;
-                    document.getElementById("timer-display").innerText = "0.0";
-                    alert(`測驗結束！次數：${count} 次`);
-                    document.getElementById("start-btn").disabled = false;
-                    document.getElementById("start-btn").innerText = "重新測驗";
-                } else {
-                    document.getElementById("timer-display").innerText = timeLeft.toFixed(1);
+                    alert("測驗結束，總計：" + count + " 次");
                 }
             }, 100);
         }
 
         async function loop() {
-            webcam.update(); 
-            await predict();
-            window.requestAnimationFrame(loop);
-        }
-
-        async function predict() {
+            webcam.update();
             const { pose, posenetOutput } = await model.estimatePose(webcam.canvas);
             const prediction = await model.predict(posenetOutput);
-            let bestPred = prediction.reduce((prev, curr) => (prev.probability > curr.probability) ? prev : curr);
 
-            if (bestPred.probability > 0.85) {
-                let name = bestPred.className;
-                if (name === "Stand" || name === "站立" || name === "起立" || name === "Class 1") {
+            let best = prediction.reduce((prev, curr) => (prev.probability > curr.probability) ? prev : curr);
+
+            if (best.probability > 0.8) {
+                if (best.className.includes("Stand") || best.className.includes("站")) {
                     currentState = "Stand";
-                } 
-                else if (name === "Sit" || name === "坐下" || name === "Class 2") {
-                    if (currentState === "Stand" && isTesting) {
+                } else if (best.className.includes("Sit") || best.className.includes("坐")) {
+                    if (isTesting && currentState === "Stand") {
                         count++;
                         document.getElementById("count-display").innerText = count;
                     }
-                    currentState = "Sit"; 
+                    currentState = "Sit";
                 }
             }
+
             ctx.drawImage(webcam.canvas, 0, 0);
             if (pose) {
-                tmPose.drawKeypoints(pose.keypoints, 0.5, ctx, 6);
-                tmPose.drawSkeleton(pose.keypoints, 0.5, ctx, 4);
+                tmPose.drawKeypoints(pose.keypoints, 0.5, ctx);
+                tmPose.drawSkeleton(pose.keypoints, 0.5, ctx);
             }
+            window.requestAnimationFrame(loop);
         }
     </script>
 </body>
