@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>高齡 30 秒椅子站立檢測 (高準度還原版)</title>
+    <title>高齡 30 秒椅子站立檢測 (原生高準度版)</title>
     <style>
         body { font-family: '微軟正黑體', sans-serif; text-align: center; background-color: #f4f6f9; margin: 0; padding: 10px; }
-        .input-group { margin: 15px auto; width: 90%; max-width: 400px; text-align: left; }
+        .input-group { margin: 10px auto; width: 90%; max-width: 400px; text-align: left; }
         label { font-weight: bold; color: #2c3e50; }
-        input[type="text"] { width: 100%; padding: 12px; margin-top: 5px; border-radius: 8px; border: 1px solid #bdc3c7; font-size: 18px; box-sizing: border-box; }
+        input[type="text"] { width: 100%; padding: 10px; margin-top: 5px; border-radius: 8px; border: 1px solid #bdc3c7; font-size: 16px; box-sizing: border-box; }
         
         .timer-box { font-size: 60px; color: #e67e22; font-weight: bold; margin-top: 5px; }
         .counter-box { font-size: 40px; color: #2c3e50; font-weight: bold; margin: 5px 0; }
@@ -25,11 +25,7 @@
         #start-btn { background-color: #27ae60; }
         #start-btn:disabled { background-color: #95a5a6; cursor: not-allowed; }
         
-        #canvas-container { position: relative; margin: 0 auto; width: 100%; max-width: 480px; display: flex; justify-content: center; }
-        
-        /* 核心修復：讓原生相機在背景全尺寸運作，保持 AI 辨識的完美比例與高準度，但不干擾視覺 */
-        #native-video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; z-index: -1; pointer-events: none; }
-        
+        #canvas-container { margin: 0 auto; display: flex; justify-content: center; width: 100%; max-width: 480px; position: relative; }
         canvas { border-radius: 15px; background-color: #000; width: 100%; height: auto; }
         .flipped { transform: scaleX(-1); }
     </style>
@@ -55,7 +51,7 @@
     <button onclick="document.getElementById('canvas').classList.toggle('flipped')" style="background:#3498db; font-size:16px; padding:10px; margin-bottom:10px; color:white; border:none; border-radius:8px;">🪞 切換螢幕左右方向</button>
 
     <div id="canvas-container">
-        <video id="native-video" playsinline autoplay muted></video>
+        <video id="native-video" playsinline autoplay muted style="display:none;"></video>
         <canvas id="canvas"></canvas>
     </div>
 
@@ -86,22 +82,21 @@
                 videoElement.onloadedmetadata = () => {
                     videoElement.play(); 
                     
-                    // 將畫布的解析度精準對齊相機的原生解析度
-                    canvas.width = videoElement.videoWidth; 
-                    canvas.height = videoElement.videoHeight;
-                    
-                    ctx = canvas.getContext("2d");
-                    
-                    document.getElementById("init-btn").style.display = "none";
-                    document.getElementById("start-btn").disabled = false;
-                    document.getElementById("status-display").innerText = "準備就緒，輸入姓名後即可開始";
-                    
-                    window.requestAnimationFrame(loop);
+                    // 稍微延遲 0.5 秒，確保手機相機真的抓到真實長寬，避免被壓扁
+                    setTimeout(() => {
+                        canvas.width = videoElement.videoWidth; 
+                        canvas.height = videoElement.videoHeight;
+                        ctx = canvas.getContext("2d");
+                        
+                        document.getElementById("init-btn").style.display = "none";
+                        document.getElementById("start-btn").disabled = false;
+                        document.getElementById("status-display").innerText = "準備就緒，可開始測驗";
+                        
+                        window.requestAnimationFrame(loop);
+                    }, 500);
                 };
             } catch (error) {
                 alert("相機開啟失敗！請檢查相機權限設定。");
-                document.getElementById("init-btn").innerText = "重試開啟相機";
-                document.getElementById("init-btn").disabled = false;
             }
         }
 
@@ -140,55 +135,47 @@
                 } else {
                     document.getElementById("timer-display").innerText = timeLeft.toFixed(1);
                 }
-            }, 50);
+            }, 100);
         }
 
         async function loop() {
-            try {
-                if (videoElement.readyState >= 2) { 
-                    await predict();
-                }
-            } catch (err) {
-                console.error("略過異常影格:", err);
+            if (videoElement.readyState >= 2) { 
+                await predict();
             }
             await new Promise(resolve => setTimeout(resolve, 0)); 
             window.requestAnimationFrame(loop);
         }
 
         async function predict() {
-            // 讓使用者看畫布底圖
-            ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
-
-            // 【關鍵還原】：讓 AI 回去看「未變形的原生影片 (videoElement)」，準確度最高！
+            // 1. 直接餵給 AI 最純粹的原生相機影像
             const { pose, posenetOutput } = await model.estimatePose(videoElement);
 
+            // 2. 將原生影像畫到 Canvas 上讓使用者看
+            ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+
             if (pose && posenetOutput) {
-                // 將 AI 算好的完美座標畫到畫布上
-                tmPose.drawKeypoints(pose.keypoints, 0.5, ctx);
-                tmPose.drawSkeleton(pose.keypoints, 0.5, ctx);
+                // 3. 畫出骨架
+                tmPose.drawKeypoints(pose.keypoints, 0.5, ctx, 6);
+                tmPose.drawSkeleton(pose.keypoints, 0.5, ctx, 4);
 
                 const prediction = await model.predict(posenetOutput);
                 
                 if (prediction && prediction.length > 0) {
                     let bestPred = prediction.reduce((prev, current) => (prev.probability > current.probability) ? prev : current);
                     
-                    let aiNameRaw = bestPred.className;
-                    let aiNameLower = aiNameRaw.toLowerCase(); 
+                    // 加上 .trim() 避免 Teachable Machine 的標籤帶有隱形空白字元
+                    let aiName = bestPred.className.trim(); 
                     let aiScore = Math.round(bestPred.probability * 100);
 
-                    let flagText = hasStoodUp ? "【已起身，待坐下】" : "【等待起身】";
-                    document.getElementById("debug-panel").innerText = `AI 看到：${aiNameRaw} (${aiScore}%) \n 邏輯狀態：${flagText}`;
+                    let flagText = hasStoodUp ? "已起身" : "待起身";
+                    document.getElementById("debug-panel").innerText = `AI 看到：${aiName} (${aiScore}%) [${flagText}]`;
 
-                    // 保持高敏感度的模糊比對
-                    let isStanding = aiNameLower.includes("stand") || aiNameLower.includes("站") || aiNameLower.includes("起") || aiNameLower.includes("1") || aiNameLower.includes("up");
-                    let isSitting = aiNameLower.includes("sit") || aiNameLower.includes("坐") || aiNameLower.includes("下") || aiNameLower.includes("2") || aiNameLower.includes("down");
-
-                    // 敏感度調降回 50%，增加反應速度
+                    // 只要大於 50% 就採納，反應最快
                     if (isTesting && bestPred.probability > 0.50) {
-                        if (isStanding) {
+                        if (aiName === "站力") {
                             hasStoodUp = true; 
                         } 
-                        else if (isSitting) {
+                        else if (aiName === "坐下") {
                             if (hasStoodUp) {
                                 count++;
                                 document.getElementById("count-display").innerText = count;
