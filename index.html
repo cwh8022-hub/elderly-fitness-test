@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>高齡 30 秒椅子站立檢測 (正方形比例校正版)</title>
+    <title>高齡 30 秒椅子站立檢測 (無變形原生版)</title>
     <style>
         body { font-family: '微軟正黑體', sans-serif; text-align: center; background-color: #f4f6f9; margin: 0; padding: 10px; }
         .timer-box { font-size: 60px; color: #e67e22; font-weight: bold; margin-top: 5px; }
@@ -21,9 +21,9 @@
         #start-btn { background-color: #27ae60; }
         #start-btn:disabled { background-color: #95a5a6; }
         
-        /* 🔥 將容器強制設定為正方形，讓你看見 AI 眼中的真實世界 🔥 */
-        #canvas-container { margin: 0 auto; display: flex; justify-content: center; width: 100%; max-width: 400px; position: relative; }
-        canvas { border-radius: 15px; background-color: #000; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; }
+        #canvas-container { margin: 0 auto; display: flex; justify-content: center; width: 100%; max-width: 480px; position: relative; }
+        /* 讓畫布自動適應原生相機比例 */
+        canvas { border-radius: 15px; background-color: #000; width: 100%; height: auto; }
         .flipped { transform: scaleX(-1); }
     </style>
 </head>
@@ -43,6 +43,7 @@
     <button onclick="document.getElementById('canvas').classList.toggle('flipped')" style="background:#3498db; font-size:16px; padding:10px; margin-bottom:10px; color:white; border:none; border-radius:8px;">🪞 切換螢幕左右方向</button>
 
     <div id="canvas-container">
+        <video id="native-video" playsinline autoplay muted style="display:none;"></video>
         <canvas id="canvas"></canvas>
     </div>
 
@@ -51,7 +52,8 @@
 
     <script>
         const URL = "https://teachablemachine.withgoogle.com/models/m5xSQ1Ixr/";
-        let model, webcam, ctx;
+        let model, ctx;
+        let videoElement = document.getElementById('native-video');
         let count = 0;
         let currentState = "None"; 
         let isTesting = false; 
@@ -63,25 +65,32 @@
             document.getElementById("init-btn").disabled = true;
 
             try {
+                // 1. 載入模型
                 model = await tmPose.load(URL + "model.json", URL + "metadata.json");
                 
-                // 🔥 核心修正：將相機底層解析度改為標準的正方形 400x400 🔥
-                webcam = new tmPose.Webcam(400, 400, false); 
-                await webcam.setup({ facingMode: "environment" }); 
-                await webcam.play();
-                window.requestAnimationFrame(loop);
+                // 2. 開除 tmPose.Webcam，改用純 HTML5 原生相機呼叫！
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: "environment" } // 強制後置鏡頭
+                });
+                videoElement.srcObject = stream;
 
-                const canvas = document.getElementById("canvas");
-                canvas.width = 400; 
-                canvas.height = 400;
-                ctx = canvas.getContext("2d");
-
-                document.getElementById("init-btn").style.display = "none";
-                document.getElementById("start-btn").disabled = false;
-                document.getElementById("status-display").innerText = "相機已啟動！";
+                // 3. 等待鏡頭畫面載入，並將畫布大小「完美對齊」相機的真實比例，拒絕擠壓！
+                videoElement.onloadedmetadata = () => {
+                    const canvas = document.getElementById("canvas");
+                    canvas.width = videoElement.videoWidth; 
+                    canvas.height = videoElement.videoHeight;
+                    ctx = canvas.getContext("2d");
+                    
+                    document.getElementById("init-btn").style.display = "none";
+                    document.getElementById("start-btn").disabled = false;
+                    document.getElementById("status-display").innerText = "相機已啟動！";
+                    
+                    // 開始影像辨識迴圈
+                    window.requestAnimationFrame(loop);
+                };
 
             } catch (error) {
-                alert("相機開啟失敗！");
+                alert("相機開啟失敗！請檢查 Safari 權限設定。");
                 document.getElementById("init-btn").innerText = "重試開啟相機";
                 document.getElementById("init-btn").disabled = false;
             }
@@ -112,13 +121,15 @@
         }
 
         async function loop() {
-            webcam.update(); 
-            await predict();
+            if (videoElement.readyState >= 2) { // 確保有影像才判斷
+                await predict();
+            }
             window.requestAnimationFrame(loop);
         }
 
         async function predict() {
-            const { pose, posenetOutput } = await model.estimatePose(webcam.canvas);
+            // 直接餵給 AI「無擠壓的真實影像」
+            const { pose, posenetOutput } = await model.estimatePose(videoElement);
             const prediction = await model.predict(posenetOutput);
 
             let bestPred = prediction.reduce((prev, current) => (prev.probability > current.probability) ? prev : current);
@@ -129,7 +140,6 @@
 
             let nameLower = aiName.toLowerCase();
 
-            // 門檻設定為 60%
             if (bestPred.probability > 0.60) {
                 if (nameLower.includes("stand") || nameLower.includes("站") || nameLower.includes("起") || nameLower.includes("1")) {
                     currentState = "Stand";
@@ -143,12 +153,11 @@
                 }
             }
 
-            if (webcam.canvas) {
-                ctx.drawImage(webcam.canvas, 0, 0);
-                if (pose) {
-                    tmPose.drawKeypoints(pose.keypoints, 0.5, ctx, 6);
-                    tmPose.drawSkeleton(pose.keypoints, 0.5, ctx, 4);
-                }
+            // 畫出影像與骨架
+            ctx.drawImage(videoElement, 0, 0, document.getElementById("canvas").width, document.getElementById("canvas").height);
+            if (pose) {
+                tmPose.drawKeypoints(pose.keypoints, 0.5, ctx, 6);
+                tmPose.drawSkeleton(pose.keypoints, 0.5, ctx, 4);
             }
         }
     </script>
