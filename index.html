@@ -3,16 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>高齡 30 秒椅子站立檢測 (抓漏版)</title>
+    <title>高齡 30 秒椅子站立檢測 (正方形比例校正版)</title>
     <style>
         body { font-family: '微軟正黑體', sans-serif; text-align: center; background-color: #f4f6f9; margin: 0; padding: 10px; }
         .timer-box { font-size: 60px; color: #e67e22; font-weight: bold; margin-top: 5px; }
         .counter-box { font-size: 40px; color: #2c3e50; font-weight: bold; margin: 5px 0; }
         
-        /* 🔥 抓漏神器：把 AI 的內心話放大顯示 🔥 */
         #debug-panel { 
-            font-size: 24px; color: #c0392b; font-weight: bold; background: #fdebd0; 
-            padding: 15px; border-radius: 10px; border: 3px dashed #e67e22; margin: 10px auto; width: 90%; max-width: 400px;
+            font-size: 22px; color: #c0392b; font-weight: bold; background: #fdebd0; 
+            padding: 10px; border-radius: 10px; border: 3px dashed #e67e22; margin: 10px auto; width: 90%; max-width: 400px;
         }
 
         .status-box { font-size: 18px; color: #7f8c8d; font-weight: bold; height: 25px; margin-bottom: 10px; }
@@ -21,8 +20,10 @@
         #init-btn { background-color: #e67e22; }
         #start-btn { background-color: #27ae60; }
         #start-btn:disabled { background-color: #95a5a6; }
-        #canvas-container { margin: 0 auto; display: flex; justify-content: center; width: 100%; max-width: 480px; position: relative; }
-        canvas { border-radius: 15px; background-color: #000; width: 100%; height: auto; }
+        
+        /* 🔥 將容器強制設定為正方形，讓你看見 AI 眼中的真實世界 🔥 */
+        #canvas-container { margin: 0 auto; display: flex; justify-content: center; width: 100%; max-width: 400px; position: relative; }
+        canvas { border-radius: 15px; background-color: #000; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; }
         .flipped { transform: scaleX(-1); }
     </style>
 </head>
@@ -32,7 +33,6 @@
     <div class="counter-box">次數：<span id="count-display">0</span></div>
     
     <div id="debug-panel">等待相機啟動...</div>
-
     <div class="status-box" id="status-display">等待啟動...</div>
 
     <div class="btn-group">
@@ -40,7 +40,7 @@
         <button id="start-btn" onclick="startTest()" disabled>2. 開始 30 秒測驗</button>
     </div>
 
-    <button onclick="document.getElementById('canvas').classList.toggle('flipped')" style="background:#3498db; font-size:16px; padding:10px; margin-bottom:10px;">🪞 切換螢幕左右方向</button>
+    <button onclick="document.getElementById('canvas').classList.toggle('flipped')" style="background:#3498db; font-size:16px; padding:10px; margin-bottom:10px; color:white; border:none; border-radius:8px;">🪞 切換螢幕左右方向</button>
 
     <div id="canvas-container">
         <canvas id="canvas"></canvas>
@@ -64,14 +64,16 @@
 
             try {
                 model = await tmPose.load(URL + "model.json", URL + "metadata.json");
-                webcam = new tmPose.Webcam(480, 640, false); 
+                
+                // 🔥 核心修正：將相機底層解析度改為標準的正方形 400x400 🔥
+                webcam = new tmPose.Webcam(400, 400, false); 
                 await webcam.setup({ facingMode: "environment" }); 
                 await webcam.play();
                 window.requestAnimationFrame(loop);
 
                 const canvas = document.getElementById("canvas");
-                canvas.width = 480; 
-                canvas.height = 640;
+                canvas.width = 400; 
+                canvas.height = 400;
                 ctx = canvas.getContext("2d");
 
                 document.getElementById("init-btn").style.display = "none";
@@ -90,8 +92,7 @@
             count = 0;
             timeLeft = 30.0;
             isTesting = true;
-            currentState = "Sit"; // 預設一開始是坐下
-            
+            currentState = "Sit"; 
             document.getElementById("count-display").innerText = "0";
             document.getElementById("status-display").innerText = "測驗進行中...";
 
@@ -120,26 +121,20 @@
             const { pose, posenetOutput } = await model.estimatePose(webcam.canvas);
             const prediction = await model.predict(posenetOutput);
 
-            // 找出分數最高的那個標籤
             let bestPred = prediction.reduce((prev, current) => (prev.probability > current.probability) ? prev : current);
             let aiName = bestPred.className;
             let aiScore = Math.round(bestPred.probability * 100);
 
-            // 🔥 直接把 AI 看見的名字印在螢幕上 🔥
             document.getElementById("debug-panel").innerText = `AI 看到：【 ${aiName} 】 (${aiScore}%)`;
 
-            // 將標籤名字轉成小寫，比較好抓關鍵字
             let nameLower = aiName.toLowerCase();
 
-            // 只要信心分數大於 60%，就進行判斷 (降低門檻適應手機)
+            // 門檻設定為 60%
             if (bestPred.probability > 0.60) {
-                // 如果名字裡面包含 stand、站、起立、1 等字眼
                 if (nameLower.includes("stand") || nameLower.includes("站") || nameLower.includes("起") || nameLower.includes("1")) {
                     currentState = "Stand";
                 } 
-                // 如果名字裡面包含 sit、坐、2 等字眼
                 else if (nameLower.includes("sit") || nameLower.includes("坐") || nameLower.includes("2")) {
-                    // 只要上一秒是站立，現在是坐下，立刻加一次！
                     if (currentState === "Stand" && isTesting) {
                         count++;
                         document.getElementById("count-display").innerText = count;
