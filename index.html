@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>高齡 30 秒椅子站立檢測 (骨架完美對齊版)</title>
+    <title>高齡 30 秒椅子站立檢測 (高敏完美版)</title>
     <style>
         body { font-family: '微軟正黑體', sans-serif; text-align: center; background-color: #f4f6f9; margin: 0; padding: 10px; }
         .input-group { margin: 15px auto; width: 90%; max-width: 400px; text-align: left; }
@@ -82,7 +82,6 @@
                 videoElement.onloadedmetadata = () => {
                     videoElement.play(); 
                     
-                    // 賦予確切的寬高數值，確保座標計算有基準點
                     videoElement.width = videoElement.videoWidth || 480;
                     videoElement.height = videoElement.videoHeight || 640;
                     canvas.width = videoElement.width; 
@@ -154,14 +153,11 @@
         }
 
         async function predict() {
-            // 1. 先把原生影片畫到 canvas 上
             ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
 
-            // 2. 【關鍵修正】讓 AI 直接吃 canvas 的畫面來算骨架！保證座標 100% 吻合畫布大小
             const { pose, posenetOutput } = await model.estimatePose(canvas);
 
             if (pose && posenetOutput) {
-                // 3. 畫出標準骨架 (移除會導致部分裝置報錯的自訂粗細參數)
                 tmPose.drawKeypoints(pose.keypoints, 0.5, ctx);
                 tmPose.drawSkeleton(pose.keypoints, 0.5, ctx);
 
@@ -169,18 +165,25 @@
                 
                 if (prediction && prediction.length > 0) {
                     let bestPred = prediction.reduce((prev, current) => (prev.probability > current.probability) ? prev : current);
-                    let aiName = bestPred.className; 
+                    
+                    // 轉小寫方便做模糊比對
+                    let aiNameRaw = bestPred.className;
+                    let aiNameLower = aiNameRaw.toLowerCase(); 
                     let aiScore = Math.round(bestPred.probability * 100);
 
                     let flagText = hasStoodUp ? "【已起身，待坐下】" : "【等待起身】";
-                    document.getElementById("debug-panel").innerText = `AI 看到：${aiName} (${aiScore}%) \n 邏輯狀態：${flagText}`;
+                    document.getElementById("debug-panel").innerText = `AI 看到：${aiNameRaw} (${aiScore}%) \n 邏輯狀態：${flagText}`;
 
-                    // --- 精準計數邏輯 ---
-                    if (isTesting && bestPred.probability > 0.60) {
-                        if (aiName === "站力") {
+                    // --- 恢復高敏感度模糊比對 ---
+                    let isStanding = aiNameLower.includes("stand") || aiNameLower.includes("站") || aiNameLower.includes("起") || aiNameLower.includes("1") || aiNameLower.includes("up");
+                    let isSitting = aiNameLower.includes("sit") || aiNameLower.includes("坐") || aiNameLower.includes("下") || aiNameLower.includes("2") || aiNameLower.includes("down");
+
+                    // 只要大於 50% 信心度就採納 (增加靈敏度)
+                    if (isTesting && bestPred.probability > 0.50) {
+                        if (isStanding) {
                             hasStoodUp = true; 
                         } 
-                        else if (aiName === "坐下") {
+                        else if (isSitting) {
                             if (hasStoodUp) {
                                 count++;
                                 document.getElementById("count-display").innerText = count;
